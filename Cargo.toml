@@ -1,6 +1,29 @@
-[package]
-name = "kandb"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+  "crates/kandb",
+  "crates/xtask",
+]
+default-members = ["crates/kandb"]
 
-[dependencies]
+resolver = "2"
+
+[workspace.dependencies]
+gpui = "0.2.2"
+
+[profile.dev]
+split-debuginfo = "unpacked"
+incremental = true
+codegen-units = 16
+
+[profile.dev.build-override]
+codegen-units = 16
+split-debuginfo = "unpacked"
+debug = true
+
+[profile.release]
+debug = "limited"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false

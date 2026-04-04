@@ -2,6 +2,8 @@
 
 English | [简体中文](./README.zh-CN.md)
 
+![kanDB preview](./assets/branding/readme-hero.png)
+
 A lightweight database viewer and manager for a fast, focused desktop workflow.
 
 > kanDB is currently in an early stage. The repository is still a bootstrap project, and the product direction described here is the intended roadmap rather than a list of completed features.
@@ -41,5 +43,5 @@ The repository currently contains the initial Rust project scaffold. As implemen
 To run the current project locally:
 
 ```bash
-cargo run
+cargo run -p kandb
 ```
