@@ -95,6 +95,9 @@ fn main() -> KandbResult<()> {
             },
             |window, cx| {
                 let view = cx.new(|cx| HomeView::new(window, cx));
+                let focus_handle = view.read(cx).focus_handle(cx).clone();
+                window.activate_window();
+                focus_handle.focus(window);
                 cx.new(|cx| Root::new(view, window, cx))
             },
         ) {

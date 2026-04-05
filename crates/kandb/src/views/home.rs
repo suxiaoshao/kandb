@@ -3,11 +3,15 @@ use gpui_component::{ActiveTheme, Root, TitleBar, label::Label, v_flex};
 
 pub(crate) fn init(_cx: &mut App) {}
 
-pub(crate) struct HomeView;
+pub(crate) struct HomeView {
+    focus_handle: FocusHandle,
+}
 
 impl HomeView {
-    pub(crate) fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
-        Self
+    pub(crate) fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+        }
     }
 
     fn close_window(
@@ -33,12 +37,19 @@ impl HomeView {
     }
 }
 
+impl Focusable for HomeView {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
 
         v_flex()
+            .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::close_window))
             .on_action(cx.listener(Self::minimize))
             .on_action(cx.listener(Self::zoom))
