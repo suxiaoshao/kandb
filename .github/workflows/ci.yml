@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.ref_name == 'main' && github.sha || 'anysha' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runs_on: macos-latest
+            run_clippy: true
+          - name: Linux
+            runs_on: ubuntu-latest
+            run_clippy: false
+          - name: Windows
+            runs_on: windows-latest
+            run_clippy: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: ${{ matrix.runs_on == 'ubuntu-latest' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            gcc \
+            g++ \
+            libfontconfig1-dev \
+            libssl-dev \
+            libwayland-dev \
+            libwebkit2gtk-4.1-dev \
+            libx11-xcb-dev \
+            libxdo-dev \
+            libxkbcommon-x11-dev \
+            libzstd-dev \
+            pkg-config \
+            vulkan-validationlayers \
+            libvulkan1
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo build
+        run: cargo build --workspace --locked
+
+      - name: Cargo test
+        run: cargo test --workspace --locked
+
+      - name: Cargo clippy
+        if: ${{ matrix.run_clippy }}
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
