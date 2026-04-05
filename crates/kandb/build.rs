@@ -25,18 +25,18 @@ fn main() {
             res.set_icon(icon.to_str().unwrap());
         } else if !icon.exists() {
             println!(
-                "cargo:warning=kanDB icon not found at '{}'; building without app icon",
+                "cargo:warning=KanDB icon not found at '{}'; building without app icon",
                 icon.display()
             );
         } else {
             println!(
-                "cargo:warning=kanDB icon must be .ico for Windows resources (got '{}'); building without app icon",
+                "cargo:warning=KanDB icon must be .ico for Windows resources (got '{}'); building without app icon",
                 icon.display()
             );
         }
 
-        res.set("FileDescription", "kanDB");
-        res.set("ProductName", "kanDB");
+        res.set("FileDescription", "KanDB");
+        res.set("ProductName", "KanDB");
 
         if let Err(err) = res.compile() {
             eprintln!("{err}");

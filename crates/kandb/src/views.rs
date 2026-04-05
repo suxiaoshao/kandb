@@ -1,3 +1,4 @@
+pub(crate) mod about;
 pub(crate) mod home;
 
 use gpui::App;
