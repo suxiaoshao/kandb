@@ -2,6 +2,41 @@
 name = "kandb"
 version = "0.1.0"
 edition = "2024"
+description = "A lightweight database viewer and manager built with GPUI."
+license = "MIT"
+homepage = "https://github.com/suxiaoshao/kandb"
+repository = "https://github.com/suxiaoshao/kandb"
+build = "build.rs"
+
+[package.metadata.bundle]
+name = "kanDB"
+identifier = "top.sushao.kandb"
+publisher = "CN=Sushao"
+icon = [
+  "../../assets/icon/app-icon.ico",
+  "../../assets/icon/app-icon.iconset/icon_32x32.png",
+  "../../assets/icon/app-icon.iconset/icon_128x128.png",
+  "../../assets/icon/app-icon.iconset/icon_128x128@2x.png",
+  "../../assets/icon/app-icon.iconset/icon_256x256.png",
+  "../../assets/icon/app-icon.iconset/icon_256x256@2x.png",
+  "../../assets/icon/app-icon.iconset/icon_512x512.png",
+  "../../assets/icon/app-icon.iconset/icon_512x512@2x.png",
+]
+short_description = "A lightweight database viewer and manager built with GPUI."
+long_description = """
+kanDB is a GPUI-based desktop database client focused on viewing, exploring,
+and managing data with a fast, quiet workflow.
+"""
+category = "DeveloperTool"
 
 [dependencies]
 gpui.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+dirs-next = "2.0.0"
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["local-time"] }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"

@@ -45,3 +45,9 @@ To run the current project locally:
 ```bash
 cargo run -p kandb
 ```
+
+To build an application bundle from the workspace root:
+
+```bash
+cargo run -p xtask -- bundle
+```
