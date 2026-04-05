@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+mod app_menus;
+mod components;
 mod errors;
 mod views;
 
@@ -14,22 +16,14 @@ use tracing::{Level, event, level_filters::LevelFilter};
 use tracing_subscriber::{Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use views::home::HomeView;
 
-static APP_ID: &str = "top.sushao.kandb";
-static APP_TITLE: &str = "kanDB";
-
-actions!(kandb, [Quit]);
-
-fn quit(_: &Quit, cx: &mut App) {
-    event!(Level::INFO, "quit by action");
-    cx.quit();
-}
+pub(crate) static APP_ID: &str = "top.sushao.kandb";
+pub(crate) static APP_TITLE: &str = "KanDB";
 
 fn init(cx: &mut App) {
     gpui_component::init(cx);
-    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+    app_menus::init(cx);
+    cx.set_menus(app_menus::app_menus());
     cx.activate(true);
-    cx.on_action(quit);
-
     views::init(cx);
 }
 

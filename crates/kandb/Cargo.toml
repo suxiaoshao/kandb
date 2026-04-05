@@ -9,7 +9,7 @@ repository = "https://github.com/suxiaoshao/kandb"
 build = "build.rs"
 
 [package.metadata.bundle]
-name = "kanDB"
+name = "KanDB"
 identifier = "top.sushao.kandb"
 publisher = "CN=Sushao"
 icon = [
@@ -24,7 +24,7 @@ icon = [
 ]
 short_description = "A lightweight database viewer and manager built with GPUI."
 long_description = """
-kanDB is a GPUI-based desktop database client focused on viewing, exploring,
+KanDB is a GPUI-based desktop database client focused on viewing, exploring,
 and managing data with a fast, quiet workflow.
 """
 category = "DeveloperTool"
