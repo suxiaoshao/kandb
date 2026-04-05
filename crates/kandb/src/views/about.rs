@@ -1,9 +1,11 @@
 use crate::{APP_ID, app_menus};
 use gpui::{
     App, AppContext as _, Context, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Point, Render, SharedString, Styled, TitlebarOptions, Window,
-    WindowBounds, WindowKind, WindowOptions, point, px,
+    IntoElement, ParentElement, Render, SharedString, Styled, TitlebarOptions, Window,
+    WindowBounds, WindowKind, WindowOptions, px,
 };
+#[cfg(target_os = "macos")]
+use gpui::{Point, point};
 use gpui_component::{ActiveTheme, Sizable, button::Button, h_flex, label::Label, v_flex};
 
 pub(crate) fn open_about_window(cx: &mut App) {
@@ -229,7 +231,7 @@ mod tests {
         let titlebar = about_titlebar_options();
 
         assert_eq!(
-            titlebar.title.as_deref(),
+            titlebar.title.as_ref().map(|title| title.as_ref()),
             Some(format!("About {}", crate::APP_TITLE).as_str())
         );
         assert!(!titlebar.appears_transparent);

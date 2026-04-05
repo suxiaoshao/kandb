@@ -1,5 +1,7 @@
 use crate::{APP_TITLE, views::about::open_about_window};
-use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
+#[cfg(target_os = "macos")]
+use gpui::SystemMenuType;
+use gpui::{App, KeyBinding, Menu, MenuItem, actions};
 use tracing::{Level, event};
 
 actions!(
