@@ -4,10 +4,13 @@
 )]
 
 mod app_menus;
+mod app_paths;
 mod components;
+mod config;
 mod errors;
 mod views;
 
+use config::LoadedAppConfig;
 use errors::{KandbError, KandbResult};
 use gpui::*;
 use gpui_component::Root;
@@ -78,6 +81,15 @@ fn main() -> KandbResult<()> {
 
     let span = tracing::info_span!("kandb");
     let _enter = span.enter();
+    let config = LoadedAppConfig::load()?;
+    event!(
+        Level::INFO,
+        config_file = %config.paths.config_file().display(),
+        data_dir = %config.paths.data_dir().display(),
+        connection_count = config.file.connections.len(),
+        resolved_connection_count = config.resolved_connections.len(),
+        "app config loaded"
+    );
 
     let app = Application::new().with_assets(gpui_component_assets::Assets);
     event!(Level::INFO, "app created");
