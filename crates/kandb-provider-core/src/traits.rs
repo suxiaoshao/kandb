@@ -109,7 +109,10 @@ pub async fn execute_text_query(
     let executor = connection.text_query_executor().ok_or_else(|| {
         ProviderError::new(
             ProviderErrorKind::UnsupportedCapability,
-            format!("provider `{}` does not support text queries", connection.kind()),
+            format!(
+                "provider `{}` does not support text queries",
+                connection.kind()
+            ),
         )
     })?;
 
@@ -124,14 +127,20 @@ pub async fn read_resource(
     let reader = connection.resource_reader().ok_or_else(|| {
         ProviderError::new(
             ProviderErrorKind::UnsupportedCapability,
-            format!("provider `{}` does not support reading resources", connection.kind()),
+            format!(
+                "provider `{}` does not support reading resources",
+                connection.kind()
+            ),
         )
     })?;
 
     reader.read_resource(resource, request).await
 }
 
-pub fn build_read_all_query(connection: &dyn Connection, resource: &ResourceRef) -> Result<Option<String>> {
+pub fn build_read_all_query(
+    connection: &dyn Connection,
+    resource: &ResourceRef,
+) -> Result<Option<String>> {
     let builder = connection.text_query_builder().ok_or_else(|| {
         ProviderError::new(
             ProviderErrorKind::UnsupportedCapability,

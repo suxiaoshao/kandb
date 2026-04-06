@@ -36,6 +36,8 @@ pub struct ResourceInfo {
 pub enum ResourceKind {
     Table,
     View,
+    VirtualTable,
+    ShadowTable,
     Collection,
     Key,
     Unknown,
@@ -57,14 +59,19 @@ pub struct ListResourcesPage {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReadRequest {
     pub limit: Option<u32>,
+    pub offset: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldMeta {
+    pub ordinal: Option<usize>,
     pub name: String,
     pub logical_type: Option<LogicalType>,
     pub native_type: Option<String>,
     pub nullable: Option<bool>,
+    pub default_value_sql: Option<String>,
+    pub primary_key_ordinal: Option<u32>,
+    pub hidden: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

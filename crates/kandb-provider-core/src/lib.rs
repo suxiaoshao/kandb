@@ -5,8 +5,8 @@ mod traits;
 
 pub use error::{ProviderError, ProviderErrorKind, Result};
 pub use model::{
-    FieldMeta, ListResourcesPage, ListResourcesRequest, LogicalType, NativeValue, NamespaceInfo,
-    NamespaceKind, QueryResult, QueryRow, ReadRequest, ResourceInfo, ResourceKind, ResourceRef,
+    FieldMeta, ListResourcesPage, ListResourcesRequest, LogicalType, NamespaceInfo, NamespaceKind,
+    NativeValue, QueryResult, QueryRow, ReadRequest, ResourceInfo, ResourceKind, ResourceRef,
     Value,
 };
 pub use registry::ProviderRegistry;
@@ -117,16 +117,24 @@ mod tests {
 
             Ok(Some(vec![
                 FieldMeta {
+                    ordinal: Some(0),
                     name: "id".into(),
                     logical_type: Some(LogicalType::Int),
                     native_type: Some("INTEGER".into()),
                     nullable: Some(false),
+                    default_value_sql: None,
+                    primary_key_ordinal: Some(1),
+                    hidden: Some(false),
                 },
                 FieldMeta {
+                    ordinal: Some(1),
                     name: "id".into(),
                     logical_type: Some(LogicalType::Int),
                     native_type: Some("INTEGER".into()),
                     nullable: Some(false),
+                    default_value_sql: None,
+                    primary_key_ordinal: None,
+                    hidden: Some(false),
                 },
             ]))
         }
@@ -154,16 +162,24 @@ mod tests {
             Ok(QueryResult {
                 columns: Some(vec![
                     FieldMeta {
+                        ordinal: Some(0),
                         name: "id".into(),
                         logical_type: Some(LogicalType::Int),
                         native_type: Some("INTEGER".into()),
                         nullable: Some(false),
+                        default_value_sql: None,
+                        primary_key_ordinal: Some(1),
+                        hidden: Some(false),
                     },
                     FieldMeta {
+                        ordinal: Some(1),
                         name: "id".into(),
                         logical_type: Some(LogicalType::Int),
                         native_type: Some("INTEGER".into()),
                         nullable: Some(false),
+                        default_value_sql: None,
+                        primary_key_ordinal: None,
+                        hidden: Some(false),
                     },
                 ]),
                 rows: vec![QueryRow::Fields(vec![Value::Integer(1), Value::Integer(2)])],
@@ -199,7 +215,10 @@ mod tests {
                     document.insert("name".into(), Value::Text("mongo".into()));
                     vec![QueryRow::Document(document)]
                 }
-                _ => vec![QueryRow::Fields(vec![Value::Integer(1), Value::Text("alice".into())])],
+                _ => vec![QueryRow::Fields(vec![
+                    Value::Integer(1),
+                    Value::Text("alice".into()),
+                ])],
             };
 
             Ok(QueryResult {
@@ -289,7 +308,9 @@ mod tests {
     fn sql_results_keep_duplicate_columns_and_row_order() {
         block_on(async {
             let connection = MockConnection;
-            let result = execute_text_query(&connection, Some("public"), "SELECT 1").await.unwrap();
+            let result = execute_text_query(&connection, Some("public"), "SELECT 1")
+                .await
+                .unwrap();
 
             let columns = result.columns.unwrap();
             assert_eq!(columns.len(), 2);
@@ -411,9 +432,7 @@ mod tests {
             ),
             (
                 "datetime_tz".into(),
-                Value::DateTimeTz(
-                    OffsetDateTime::from_unix_timestamp(1_775_440_923).unwrap(),
-                ),
+                Value::DateTimeTz(OffsetDateTime::from_unix_timestamp(1_775_440_923).unwrap()),
             ),
             ("decimal".into(), Value::Decimal("12.34".into())),
             (
@@ -441,5 +460,44 @@ mod tests {
 
         let query = build_read_all_query(&connection, &resource).unwrap();
         assert_eq!(query.as_deref(), Some("SELECT * FROM public.users"));
+    }
+
+    #[test]
+    fn read_request_offset_roundtrips_via_serde() {
+        let request = ReadRequest {
+            limit: Some(50),
+            offset: Some(100),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: ReadRequest = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn field_meta_and_resource_kind_roundtrip_via_serde() {
+        let field = FieldMeta {
+            ordinal: Some(3),
+            name: "computed".into(),
+            logical_type: Some(LogicalType::Text),
+            native_type: Some("TEXT".into()),
+            nullable: Some(true),
+            default_value_sql: Some("'x'".into()),
+            primary_key_ordinal: None,
+            hidden: Some(true),
+        };
+
+        let field_json = serde_json::to_string(&field).unwrap();
+        let decoded_field: FieldMeta = serde_json::from_str(&field_json).unwrap();
+        assert_eq!(decoded_field, field);
+
+        let virtual_kind_json = serde_json::to_string(&ResourceKind::VirtualTable).unwrap();
+        let decoded_virtual_kind: ResourceKind = serde_json::from_str(&virtual_kind_json).unwrap();
+        assert_eq!(decoded_virtual_kind, ResourceKind::VirtualTable);
+
+        let shadow_kind_json = serde_json::to_string(&ResourceKind::ShadowTable).unwrap();
+        let decoded_shadow_kind: ResourceKind = serde_json::from_str(&shadow_kind_json).unwrap();
+        assert_eq!(decoded_shadow_kind, ResourceKind::ShadowTable);
     }
 }

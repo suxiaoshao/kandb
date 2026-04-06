@@ -2,6 +2,7 @@
 members = [
   "crates/kandb",
   "crates/kandb-provider-core",
+  "crates/kandb-provider-sqlite",
   "crates/xtask",
 ]
 default-members = ["crates/kandb"]
@@ -9,6 +10,8 @@ default-members = ["crates/kandb"]
 resolver = "2"
 
 [workspace.dependencies]
+async-compat = "0.2.5"
+async-lock = "3.4.1"
 async-trait = "0.1.89"
 gpui = "0.2.2"
 gpui-component = "0.5.1"
@@ -16,6 +19,7 @@ gpui-component-assets = "0.5.1"
 indexmap = { version = "2.12.0", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
 thiserror = "2.0.18"
 time = { version = "0.3.44", features = ["serde"] }
 

@@ -1,0 +1,20 @@
+[package]
+name = "kandb-provider-sqlite"
+version = "0.1.0"
+edition = "2024"
+description = "SQLite provider implementation for KanDB."
+license = "MIT"
+homepage = "https://github.com/suxiaoshao/kandb"
+repository = "https://github.com/suxiaoshao/kandb"
+
+[dependencies]
+async-compat.workspace = true
+async-lock.workspace = true
+async-trait.workspace = true
+kandb-provider-core = { path = "../kandb-provider-core" }
+serde.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+futures = "0.3.31"
+tempfile = "3.20.0"
