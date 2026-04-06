@@ -4482,6 +4482,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kandb-provider-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "indexmap 2.13.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
