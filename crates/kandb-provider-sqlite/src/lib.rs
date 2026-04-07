@@ -298,8 +298,11 @@ fn connect_options(config: &SqliteConfig) -> Result<SqliteConnectOptions> {
     options = options
         .create_if_missing(config.create_if_missing)
         .read_only(config.read_only)
-        .journal_mode(SqliteJournalMode::Wal)
         .foreign_keys(true);
+
+    if !config.read_only {
+        options = options.journal_mode(SqliteJournalMode::Wal);
+    }
 
     Ok(options)
 }
@@ -470,12 +473,17 @@ fn build_select_all_query(
         quote_identifier(&resource.resource_id)
     );
 
-    if let Some(limit) = limit {
-        query.push_str(&format!(" LIMIT {limit}"));
-    }
-
-    if let Some(offset) = offset {
-        query.push_str(&format!(" OFFSET {offset}"));
+    match (limit, offset) {
+        (Some(limit), Some(offset)) => {
+            query.push_str(&format!(" LIMIT {limit} OFFSET {offset}"));
+        }
+        (Some(limit), None) => {
+            query.push_str(&format!(" LIMIT {limit}"));
+        }
+        (None, Some(offset)) => {
+            query.push_str(&format!(" LIMIT -1 OFFSET {offset}"));
+        }
+        (None, None) => {}
     }
 
     query
@@ -562,6 +570,33 @@ mod tests {
             };
 
             assert_eq!(error.kind(), ProviderErrorKind::Connect);
+        });
+    }
+
+    #[test]
+    fn read_only_connections_do_not_fail_wal_setup() {
+        block_on(async {
+            let provider = SqliteProvider;
+            let temp = NamedTempFile::new().unwrap();
+            let path = temp.path().to_path_buf();
+
+            provider
+                .connect(SqliteConfig {
+                    location: SqliteLocation::Path(path.clone()),
+                    read_only: false,
+                    create_if_missing: true,
+                })
+                .await
+                .unwrap();
+
+            provider
+                .test_connection(&SqliteConfig {
+                    location: SqliteLocation::Path(path),
+                    read_only: true,
+                    create_if_missing: false,
+                })
+                .await
+                .unwrap();
         });
     }
 
@@ -813,5 +848,19 @@ mod tests {
                 row => panic!("expected fields row, got {row:?}"),
             }
         });
+    }
+
+    #[test]
+    fn build_select_all_query_adds_limit_minus_one_for_offset_only() {
+        let query = build_select_all_query(
+            &ResourceRef {
+                namespace_id: "main".into(),
+                resource_id: "users".into(),
+            },
+            None,
+            Some(10),
+        );
+
+        assert_eq!(query, "SELECT * FROM \"main\".\"users\" LIMIT -1 OFFSET 10");
     }
 }

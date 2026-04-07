@@ -41,11 +41,13 @@ pub(crate) struct VisibleSidebarNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SidebarTree {
     roots: Vec<SidebarNode>,
+    default_connection_id: Option<String>,
 }
 
 impl SidebarTree {
     pub(crate) fn from_config(config: &LoadedAppConfig) -> Self {
         Self {
+            default_connection_id: config.file.default_connection_id.clone(),
             roots: config
                 .resolved_connections
                 .iter()
@@ -63,6 +65,13 @@ impl SidebarTree {
     }
 
     pub(crate) fn default_selected_node_id(&self) -> Option<&str> {
+        if let Some(default_connection_id) = self.default_connection_id.as_deref() {
+            let preferred_id = format!("connection:{default_connection_id}");
+            if let Some(node) = self.roots.iter().find(|node| node.id == preferred_id) {
+                return Some(node.id.as_str());
+            }
+        }
+
         self.roots.first().map(|node| node.id.as_str())
     }
 
@@ -251,5 +260,38 @@ mod tests {
 
         assert_eq!(visible.len(), 2);
         assert_eq!(visible[1].id, "namespace:local-main:main");
+    }
+
+    #[test]
+    fn default_selection_prefers_configured_default_connection() {
+        let mut config = sample_config();
+        config.file.default_connection_id = Some("secondary".to_owned());
+        config.resolved_connections = vec![
+            ResolvedConnectionProfile {
+                id: "local-main".to_owned(),
+                name: "Local Main".to_owned(),
+                provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
+                    location: SqliteLocation::Memory,
+                    read_only: false,
+                    create_if_missing: true,
+                }),
+            },
+            ResolvedConnectionProfile {
+                id: "secondary".to_owned(),
+                name: "Secondary".to_owned(),
+                provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
+                    location: SqliteLocation::Memory,
+                    read_only: false,
+                    create_if_missing: true,
+                }),
+            },
+        ];
+
+        let tree = SidebarTree::from_config(&config);
+
+        assert_eq!(
+            tree.default_selected_node_id(),
+            Some("connection:secondary")
+        );
     }
 }
