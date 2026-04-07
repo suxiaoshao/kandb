@@ -107,13 +107,15 @@ fn read_env_locale(name: &str) -> Option<String> {
 }
 
 fn normalize_locale(value: &str) -> Option<LanguageIdentifier> {
-    let normalized = value
-        .split(['.', '@'])
-        .next()
-        .unwrap_or(value)
-        .replace('_', "-");
+    value.split(':').find_map(|candidate| {
+        let normalized = candidate
+            .split(['.', '@'])
+            .next()
+            .unwrap_or(candidate)
+            .replace('_', "-");
 
-    normalized.parse::<LanguageIdentifier>().ok()
+        normalized.parse::<LanguageIdentifier>().ok()
+    })
 }
 
 fn build_bundle(lang: &str, source: &str) -> FluentBundle<FluentResource> {
@@ -148,6 +150,14 @@ mod tests {
     fn invalid_earlier_locale_does_not_block_valid_later_locale() {
         assert_eq!(
             locale_from_candidates(None, Some("C"), Some("zh_CN.UTF-8"), None),
+            Locale::ZhCn
+        );
+    }
+
+    #[test]
+    fn language_locale_list_uses_first_valid_entry() {
+        assert_eq!(
+            locale_from_candidates(None, None, None, Some("zh_CN:en_US")),
             Locale::ZhCn
         );
     }
