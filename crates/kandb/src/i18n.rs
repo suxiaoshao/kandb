@@ -77,18 +77,20 @@ fn detect_locale() -> Locale {
     locale_from_candidates(
         sys_locale::get_locale().as_deref(),
         read_env_locale("LC_ALL").as_deref(),
-        read_env_locale("LANG").as_deref(),
+        read_env_locale("LC_MESSAGES").as_deref(),
         read_env_locale("LANGUAGE").as_deref(),
+        read_env_locale("LANG").as_deref(),
     )
 }
 
 fn locale_from_candidates(
     sys_locale: Option<&str>,
     lc_all: Option<&str>,
-    lang: Option<&str>,
+    lc_messages: Option<&str>,
     language: Option<&str>,
+    lang: Option<&str>,
 ) -> Locale {
-    let locale = [sys_locale, lc_all, lang, language]
+    let locale = [sys_locale, lc_all, lc_messages, language, lang]
         .into_iter()
         .flatten()
         .find_map(normalize_locale);
@@ -136,20 +138,23 @@ mod tests {
     #[test]
     fn chinese_locale_maps_to_zh_cn() {
         assert_eq!(
-            locale_from_candidates(Some("zh_CN.UTF-8"), None, None, None),
+            locale_from_candidates(Some("zh_CN.UTF-8"), None, None, None, None),
             Locale::ZhCn
         );
     }
 
     #[test]
     fn english_is_default_when_candidates_are_missing() {
-        assert_eq!(locale_from_candidates(None, None, None, None), Locale::EnUs);
+        assert_eq!(
+            locale_from_candidates(None, None, None, None, None),
+            Locale::EnUs
+        );
     }
 
     #[test]
     fn invalid_earlier_locale_does_not_block_valid_later_locale() {
         assert_eq!(
-            locale_from_candidates(None, Some("C"), Some("zh_CN.UTF-8"), None),
+            locale_from_candidates(None, Some("C"), None, None, Some("zh_CN.UTF-8")),
             Locale::ZhCn
         );
     }
@@ -157,7 +162,35 @@ mod tests {
     #[test]
     fn language_locale_list_uses_first_valid_entry() {
         assert_eq!(
-            locale_from_candidates(None, None, None, Some("zh_CN:en_US")),
+            locale_from_candidates(None, None, None, Some("zh_CN:en_US"), None),
+            Locale::ZhCn
+        );
+    }
+
+    #[test]
+    fn lc_messages_overrides_language_and_lang() {
+        assert_eq!(
+            locale_from_candidates(
+                None,
+                None,
+                Some("zh_CN.UTF-8"),
+                Some("en_US:zh_CN"),
+                Some("en_US.UTF-8")
+            ),
+            Locale::ZhCn
+        );
+    }
+
+    #[test]
+    fn language_overrides_lang() {
+        assert_eq!(
+            locale_from_candidates(
+                None,
+                None,
+                None,
+                Some("zh_CN:en_US"),
+                Some("en_US.UTF-8")
+            ),
             Locale::ZhCn
         );
     }
