@@ -382,6 +382,8 @@ fn render_sidebar_row(
         .items_center()
         .gap_2()
         .rounded(px(8.0))
+        .border_1()
+        .border_color(cx.theme().transparent)
         .px_2()
         .py_1p5()
         .pl(padding_left)
@@ -392,7 +394,6 @@ fn render_sidebar_row(
                 0.50,
                 if sidebar_is_focused { 0.18 } else { 0.10 },
             ))
-            .border_1()
             .border_color(gpui::hsla(
                 214.0 / 360.0,
                 0.58,
@@ -443,6 +444,8 @@ fn provider_row(
         .items_center()
         .gap_2()
         .rounded(px(8.0))
+        .border_1()
+        .border_color(cx.theme().transparent)
         .px_2()
         .py_1p5()
         .pl(padding_left)
@@ -453,7 +456,6 @@ fn provider_row(
                 0.50,
                 if sidebar_is_focused { 0.18 } else { 0.10 },
             ))
-            .border_1()
             .border_color(gpui::hsla(
                 214.0 / 360.0,
                 0.58,
