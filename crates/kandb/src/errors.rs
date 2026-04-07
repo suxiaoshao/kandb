@@ -35,6 +35,22 @@ pub(crate) enum KandbError {
     ParseConfigFile { path: PathBuf, message: String },
     #[error("failed to serialize config file `{path}`: {message}")]
     SerializeConfig { path: PathBuf, message: String },
+    #[error("failed to read workspace state file `{path}`")]
+    ReadWorkspaceStateFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to write workspace state file `{path}`")]
+    WriteWorkspaceStateFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to parse workspace state file `{path}`: {message}")]
+    ParseWorkspaceStateFile { path: PathBuf, message: String },
+    #[error("failed to serialize workspace state file `{path}`: {message}")]
+    SerializeWorkspaceStateFile { path: PathBuf, message: String },
     #[error("unsupported config version `{version}`")]
     UnsupportedConfigVersion { version: u32 },
     #[error("duplicate connection id `{0}` in config")]

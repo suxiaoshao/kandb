@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/kandb-assets",
   "crates/kandb",
   "crates/kandb-provider-core",
   "crates/kandb-provider-sqlite",
@@ -10,6 +11,7 @@ default-members = ["crates/kandb"]
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = "1.0.100"
 async-compat = "0.2.5"
 async-lock = "3.4.1"
 async-trait = "0.1.89"

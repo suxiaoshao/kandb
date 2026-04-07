@@ -2,6 +2,7 @@ use crate::{
     app_paths::AppPaths,
     errors::{KandbError, KandbResult},
 };
+use gpui::Global;
 use kandb_provider_sqlite::{SqliteConfig, SqliteLocation};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,6 +30,8 @@ pub(crate) struct LoadedAppConfig {
     pub(crate) file: AppConfigFile,
     pub(crate) resolved_connections: Vec<ResolvedConnectionProfile>,
 }
+
+impl Global for LoadedAppConfig {}
 
 impl Default for AppConfigFile {
     fn default() -> Self {

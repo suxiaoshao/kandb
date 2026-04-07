@@ -33,7 +33,7 @@ category = "DeveloperTool"
 serde.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
-gpui-component-assets.workspace = true
+kandb-assets = { path = "../kandb-assets" }
 kandb-provider-sqlite = { path = "../kandb-provider-sqlite" }
 dirs-next = "2.0.0"
 thiserror = "2.0.18"

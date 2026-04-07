@@ -4548,7 +4548,7 @@ dependencies = [
  "dirs-next",
  "gpui",
  "gpui-component",
- "gpui-component-assets",
+ "kandb-assets",
  "kandb-provider-sqlite",
  "serde",
  "tempfile",
@@ -4557,6 +4557,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "winresource",
+]
+
+[[package]]
+name = "kandb-assets"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "gpui-component",
+ "gpui-component-assets",
 ]
 
 [[package]]
