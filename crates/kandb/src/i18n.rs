@@ -90,7 +90,7 @@ fn locale_from_candidates(
     language: Option<&str>,
     lang: Option<&str>,
 ) -> Locale {
-    let locale = [sys_locale, lc_all, lc_messages, language, lang]
+    let locale = [lc_all, lc_messages, language, lang, sys_locale]
         .into_iter()
         .flatten()
         .find_map(normalize_locale);
@@ -190,6 +190,20 @@ mod tests {
                 None,
                 Some("zh_CN:en_US"),
                 Some("en_US.UTF-8")
+            ),
+            Locale::ZhCn
+        );
+    }
+
+    #[test]
+    fn env_overrides_take_precedence_over_system_locale() {
+        assert_eq!(
+            locale_from_candidates(
+                Some("en_US.UTF-8"),
+                Some("zh_CN.UTF-8"),
+                None,
+                None,
+                None
             ),
             Locale::ZhCn
         );
