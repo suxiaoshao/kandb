@@ -1,0 +1,29 @@
+menu-about = About {$app_name}
+menu-services = Services
+menu-hide = Hide {$app_name}
+menu-hide-others = Hide Others
+menu-show-all = Show All
+menu-quit = Quit {$app_name}
+menu-file = File
+menu-close-window = Close Window
+menu-window = Window
+menu-minimize = Minimize
+menu-zoom = Zoom
+
+home-sidebar-title = Connections
+home-empty-title = Home
+home-empty-subtitle = No connection selected.
+home-placeholder-message = Home currently renders a synthetic tree from configured connections. Real SQLite metadata will replace these placeholder groups next.
+home-connection-description = Configured connection profile.
+home-namespace-description = Synthetic namespace preview for the configured provider.
+home-resource-group-description = Placeholder resource group. Real database objects will appear here after metadata integration.
+sidebar-group-tables = Tables
+sidebar-group-views = Views
+sidebar-group-system = System
+
+about-window-title = About {$app_name}
+about-bootstrap-note = Currently in bootstrap and early-stage development.
+about-roadmap-note = Roadmap: connections, browsing, and editing.
+about-version = Version {$version}
+about-docs = Docs
+about-github = GitHub

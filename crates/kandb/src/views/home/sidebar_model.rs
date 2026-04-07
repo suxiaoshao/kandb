@@ -1,4 +1,7 @@
-use crate::config::{LoadedAppConfig, ResolvedConnectionProfile, ResolvedProviderConfig};
+use crate::{
+    config::{LoadedAppConfig, ResolvedConnectionProfile, ResolvedProviderConfig},
+    i18n::I18n,
+};
 use gpui::SharedString;
 use kandb_assets::{IconName, ProviderIconName};
 use std::collections::BTreeSet;
@@ -45,13 +48,13 @@ pub(crate) struct SidebarTree {
 }
 
 impl SidebarTree {
-    pub(crate) fn from_config(config: &LoadedAppConfig) -> Self {
+    pub(crate) fn from_config(config: &LoadedAppConfig, i18n: &I18n) -> Self {
         Self {
             default_connection_id: config.file.default_connection_id.clone(),
             roots: config
                 .resolved_connections
                 .iter()
-                .map(build_connection_node)
+                .map(|connection| build_connection_node(connection, i18n))
                 .collect(),
         }
     }
@@ -117,7 +120,7 @@ impl SidebarTree {
     }
 }
 
-fn build_connection_node(connection: &ResolvedConnectionProfile) -> SidebarNode {
+fn build_connection_node(connection: &ResolvedConnectionProfile, i18n: &I18n) -> SidebarNode {
     let id = format!("connection:{}", connection.id);
     let parent_id = Some(id.clone());
     let children = match &connection.provider {
@@ -128,9 +131,24 @@ fn build_connection_node(connection: &ResolvedConnectionProfile) -> SidebarNode 
             icon: SidebarIcon::Lucide(IconName::HardDrive),
             parent_id,
             children: vec![
-                group_node(&connection.id, "tables", "Tables", IconName::Table),
-                group_node(&connection.id, "views", "Views", IconName::Rows3),
-                group_node(&connection.id, "system", "System", IconName::SquareTerminal),
+                group_node(
+                    &connection.id,
+                    "tables",
+                    i18n.t("sidebar-group-tables"),
+                    IconName::Table,
+                ),
+                group_node(
+                    &connection.id,
+                    "views",
+                    i18n.t("sidebar-group-views"),
+                    IconName::Rows3,
+                ),
+                group_node(
+                    &connection.id,
+                    "system",
+                    i18n.t("sidebar-group-system"),
+                    IconName::SquareTerminal,
+                ),
             ],
         }],
         ResolvedProviderConfig::Unknown { .. } => Vec::new(),
@@ -149,7 +167,7 @@ fn build_connection_node(connection: &ResolvedConnectionProfile) -> SidebarNode 
     }
 }
 
-fn group_node(connection_id: &str, slug: &str, label: &'static str, icon: IconName) -> SidebarNode {
+fn group_node(connection_id: &str, slug: &str, label: String, icon: IconName) -> SidebarNode {
     SidebarNode {
         id: format!("group:{connection_id}:main:{slug}"),
         label: label.into(),
@@ -203,6 +221,7 @@ mod tests {
             AppConfigFile, LoadedAppConfig, ResolvedConnectionProfile, ResolvedProviderConfig,
             StoredConnectionProfile,
         },
+        i18n::I18n,
     };
     use kandb_provider_sqlite::{SqliteConfig, SqliteLocation};
     use std::{collections::BTreeSet, path::PathBuf};
@@ -234,7 +253,7 @@ mod tests {
 
     #[test]
     fn sqlite_connections_project_to_synthetic_tree() {
-        let tree = SidebarTree::from_config(&sample_config());
+        let tree = SidebarTree::from_config(&sample_config(), &I18n::english_for_test());
         let visible = tree.visible_nodes(&tree.default_expanded_node_ids());
 
         assert_eq!(visible[0].id, "connection:local-main");
@@ -245,7 +264,7 @@ mod tests {
 
     #[test]
     fn valid_node_ids_include_namespace_and_groups() {
-        let tree = SidebarTree::from_config(&sample_config());
+        let tree = SidebarTree::from_config(&sample_config(), &I18n::english_for_test());
         let ids = tree.valid_node_ids();
 
         assert!(ids.contains("connection:local-main"));
@@ -255,7 +274,7 @@ mod tests {
 
     #[test]
     fn visible_nodes_respect_expansion_state() {
-        let tree = SidebarTree::from_config(&sample_config());
+        let tree = SidebarTree::from_config(&sample_config(), &I18n::english_for_test());
         let visible = tree.visible_nodes(&BTreeSet::from(["connection:local-main".to_owned()]));
 
         assert_eq!(visible.len(), 2);
@@ -287,7 +306,7 @@ mod tests {
             },
         ];
 
-        let tree = SidebarTree::from_config(&config);
+        let tree = SidebarTree::from_config(&config, &I18n::english_for_test());
 
         assert_eq!(
             tree.default_selected_node_id(),

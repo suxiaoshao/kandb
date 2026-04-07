@@ -8,6 +8,7 @@ mod app_paths;
 mod components;
 mod config;
 mod errors;
+mod i18n;
 mod views;
 mod workspace;
 
@@ -25,9 +26,10 @@ pub(crate) static APP_ID: &str = "top.sushao.kandb";
 pub(crate) static APP_TITLE: &str = "KanDB";
 
 fn init(cx: &mut App) {
+    i18n::init_i18n(cx);
     gpui_component::init(cx);
     app_menus::init(cx);
-    cx.set_menus(app_menus::app_menus());
+    cx.set_menus(app_menus::app_menus(cx.global::<i18n::I18n>()));
     cx.activate(true);
     views::init(cx);
 }
