@@ -1,0 +1,29 @@
+menu-about = 关于 {$app_name}
+menu-services = 服务
+menu-hide = 隐藏 {$app_name}
+menu-hide-others = 隐藏其他
+menu-show-all = 全部显示
+menu-quit = 退出 {$app_name}
+menu-file = 文件
+menu-close-window = 关闭窗口
+menu-window = 窗口
+menu-minimize = 最小化
+menu-zoom = 缩放
+
+home-sidebar-title = 连接
+home-empty-title = 主页
+home-empty-subtitle = 尚未选择连接。
+home-placeholder-message = 当前主页渲染的是根据已配置连接生成的合成树。接下来这些占位分组会被真实的 SQLite 元数据替换。
+home-connection-description = 已配置的连接资料。
+home-namespace-description = 面向当前 provider 的命名空间预览。
+home-resource-group-description = 资源分组占位。接入元数据后，真实数据库对象会显示在这里。
+sidebar-group-tables = 表
+sidebar-group-views = 视图
+sidebar-group-system = 系统
+
+about-window-title = 关于 {$app_name}
+about-bootstrap-note = 当前仍处于 bootstrap 和早期开发阶段。
+about-roadmap-note = 路线图：连接、浏览与编辑。
+about-version = 版本 {$version}
+about-docs = 文档
+about-github = GitHub

@@ -5,6 +5,7 @@ use crate::{
     app_menus,
     components::provider_icon::provider_icon,
     config::LoadedAppConfig,
+    i18n::I18n,
     workspace::{WorkspaceStore, save_now},
 };
 use gpui::{InteractiveElement as _, prelude::FluentBuilder as _, *};
@@ -42,7 +43,7 @@ impl HomeView {
         let focus_handle = cx.focus_handle();
         let sidebar_focus_handle = cx.focus_handle();
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>());
+        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
         let default_expanded_node_ids = tree.default_expanded_node_ids();
         let default_selected_node_id = tree.default_selected_node_id().map(ToOwned::to_owned);
         let valid_node_ids = tree.valid_node_ids();
@@ -108,7 +109,7 @@ impl HomeView {
     }
 
     fn move_left(&mut self, _: &MoveLeft, _window: &mut Window, cx: &mut Context<Self>) {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>());
+        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
 
         workspace.update(cx, |workspace, cx| {
@@ -133,7 +134,7 @@ impl HomeView {
     }
 
     fn move_right(&mut self, _: &MoveRight, _window: &mut Window, cx: &mut Context<Self>) {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>());
+        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
 
         workspace.update(cx, |workspace, cx| {
@@ -165,7 +166,7 @@ impl HomeView {
     }
 
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>());
+        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
 
         workspace.update(cx, |workspace, cx| {
@@ -192,7 +193,7 @@ impl HomeView {
     }
 
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>());
+        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
         let workspace = cx.global::<WorkspaceStore>().read(cx);
         let selected_node_id = workspace.selected_node_id().map(ToOwned::to_owned);
         let expanded_node_ids = workspace.expanded_node_ids().clone();
@@ -220,7 +221,7 @@ impl HomeView {
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
-                        Label::new("Connections")
+                        Label::new(cx.global::<I18n>().t("home-sidebar-title"))
                             .text_sm()
                             .font_weight(FontWeight::SEMIBOLD),
                     ),
@@ -244,7 +245,8 @@ impl HomeView {
     }
 
     fn render_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>());
+        let i18n = cx.global::<I18n>();
+        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), i18n);
         let workspace = cx.global::<WorkspaceStore>().read(cx);
         let selected_node = workspace
             .selected_node_id()
@@ -253,11 +255,11 @@ impl HomeView {
         let title = selected_node
             .as_ref()
             .map(|node| node.label.clone())
-            .unwrap_or_else(|| "Home".into());
+            .unwrap_or_else(|| i18n.t("home-empty-title").into());
         let subtitle = selected_node
             .as_ref()
-            .map(selected_node_description)
-            .unwrap_or_else(|| "No connection selected.".into());
+            .map(|node| selected_node_description(node, i18n))
+            .unwrap_or_else(|| i18n.t("home-empty-subtitle").into());
 
         div()
             .flex_1()
@@ -299,10 +301,8 @@ impl HomeView {
                             ),
                     )
                     .child(
-                        Label::new(
-                            "Home currently renders a synthetic tree from configured connections. Real SQLite metadata will replace these placeholder groups next.",
-                        )
-                        .text_color(cx.theme().muted_foreground),
+                        Label::new(i18n.t("home-placeholder-message"))
+                            .text_color(cx.theme().muted_foreground),
                     ),
             )
     }
@@ -382,6 +382,8 @@ fn render_sidebar_row(
         .items_center()
         .gap_2()
         .rounded(px(8.0))
+        .border_1()
+        .border_color(cx.theme().transparent)
         .px_2()
         .py_1p5()
         .pl(padding_left)
@@ -392,7 +394,6 @@ fn render_sidebar_row(
                 0.50,
                 if sidebar_is_focused { 0.18 } else { 0.10 },
             ))
-            .border_1()
             .border_color(gpui::hsla(
                 214.0 / 360.0,
                 0.58,
@@ -443,6 +444,8 @@ fn provider_row(
         .items_center()
         .gap_2()
         .rounded(px(8.0))
+        .border_1()
+        .border_color(cx.theme().transparent)
         .px_2()
         .py_1p5()
         .pl(padding_left)
@@ -453,7 +456,6 @@ fn provider_row(
                 0.50,
                 if sidebar_is_focused { 0.18 } else { 0.10 },
             ))
-            .border_1()
             .border_color(gpui::hsla(
                 214.0 / 360.0,
                 0.58,
@@ -520,11 +522,11 @@ fn render_disclosure(node: &VisibleSidebarNode) -> impl IntoElement {
         })
 }
 
-fn selected_node_description(node: &VisibleSidebarNode) -> SharedString {
+fn selected_node_description(node: &VisibleSidebarNode, i18n: &I18n) -> SharedString {
     match node.kind {
-        SidebarNodeKind::Connection => "Configured connection profile.".into(),
-        SidebarNodeKind::Namespace => "Synthetic namespace preview for the configured provider.".into(),
-        SidebarNodeKind::ResourceGroup => "Placeholder resource group. Real database objects will appear here after metadata integration.".into(),
+        SidebarNodeKind::Connection => i18n.t("home-connection-description").into(),
+        SidebarNodeKind::Namespace => i18n.t("home-namespace-description").into(),
+        SidebarNodeKind::ResourceGroup => i18n.t("home-resource-group-description").into(),
     }
 }
 
@@ -556,7 +558,8 @@ mod tests {
     use std::{collections::BTreeSet, path::PathBuf};
 
     fn sample_tree() -> SidebarTree {
-        SidebarTree::from_config(&LoadedAppConfig {
+        SidebarTree::from_config(
+            &LoadedAppConfig {
             paths: AppPaths::from_roots(PathBuf::from("/tmp/config"), PathBuf::from("/tmp/data")),
             file: AppConfigFile {
                 version: 1,
@@ -577,7 +580,9 @@ mod tests {
                     create_if_missing: true,
                 }),
             }],
-        })
+            },
+            &crate::i18n::I18n::english_for_test(),
+        )
     }
 
     #[test]
@@ -598,7 +603,8 @@ mod tests {
     fn selected_node_description_mentions_placeholder_groups() {
         let tree = sample_tree();
         let visible = tree.visible_nodes(&tree.default_expanded_node_ids());
-        let description = super::selected_node_description(&visible[2]);
+        let description =
+            super::selected_node_description(&visible[2], &crate::i18n::I18n::english_for_test());
 
         assert!(description.contains("Placeholder resource group"));
     }

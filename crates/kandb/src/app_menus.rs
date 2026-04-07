@@ -1,4 +1,5 @@
-use crate::{APP_TITLE, views::about::open_about_window};
+use crate::{APP_TITLE, i18n::I18n, views::about::open_about_window};
+use fluent_bundle::FluentArgs;
 #[cfg(target_os = "macos")]
 use gpui::SystemMenuType;
 use gpui::{App, KeyBinding, Menu, MenuItem, actions};
@@ -41,24 +42,24 @@ pub(crate) fn init(cx: &mut App) {
     cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
 }
 
-pub(crate) fn app_menus() -> Vec<Menu> {
-    let mut app_items = vec![MenuItem::action(format!("About {APP_TITLE}"), About)];
+pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
+    let mut app_items = vec![MenuItem::action(app_name_message(i18n, "menu-about"), About)];
 
     #[cfg(target_os = "macos")]
     {
         app_items.extend([
             MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::os_submenu(i18n.t("menu-services"), SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action(format!("Hide {APP_TITLE}"), Hide),
-            MenuItem::action("Hide Others", HideOthers),
-            MenuItem::action("Show All", ShowAll),
+            MenuItem::action(app_name_message(i18n, "menu-hide"), Hide),
+            MenuItem::action(i18n.t("menu-hide-others"), HideOthers),
+            MenuItem::action(i18n.t("menu-show-all"), ShowAll),
         ]);
     }
 
     app_items.extend([
         MenuItem::separator(),
-        MenuItem::action(format!("Quit {APP_TITLE}"), Quit),
+        MenuItem::action(app_name_message(i18n, "menu-quit"), Quit),
     ]);
 
     vec![
@@ -67,17 +68,23 @@ pub(crate) fn app_menus() -> Vec<Menu> {
             items: app_items,
         },
         Menu {
-            name: "File".into(),
-            items: vec![MenuItem::action("Close Window", CloseWindow)],
+            name: i18n.t("menu-file").into(),
+            items: vec![MenuItem::action(i18n.t("menu-close-window"), CloseWindow)],
         },
         Menu {
-            name: "Window".into(),
+            name: i18n.t("menu-window").into(),
             items: vec![
-                MenuItem::action("Minimize", Minimize),
-                MenuItem::action("Zoom", Zoom),
+                MenuItem::action(i18n.t("menu-minimize"), Minimize),
+                MenuItem::action(i18n.t("menu-zoom"), Zoom),
             ],
         },
     ]
+}
+
+fn app_name_message(i18n: &I18n, key: &str) -> String {
+    let mut args = FluentArgs::new();
+    args.set("app_name", APP_TITLE);
+    i18n.t_with_args(key, &args)
 }
 
 fn quit(_: &Quit, cx: &mut App) {
@@ -103,7 +110,8 @@ mod tests {
 
     #[test]
     fn builds_expected_top_level_menus() {
-        let menus = app_menus();
+        let i18n = I18n::english_for_test();
+        let menus = app_menus(&i18n);
         let names = menus
             .iter()
             .map(|menu| menu.name.to_string())
@@ -116,7 +124,8 @@ mod tests {
 
     #[test]
     fn builds_expected_app_menu_items() {
-        let mut menus = app_menus();
+        let i18n = I18n::english_for_test();
+        let mut menus = app_menus(&i18n);
         let app_menu = menus.remove(0);
         let item_names = item_names(app_menu.items);
 

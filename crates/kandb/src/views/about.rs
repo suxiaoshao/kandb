@@ -1,4 +1,7 @@
-use crate::{APP_ID, app_menus};
+use crate::{APP_ID, app_menus, i18n::I18n};
+#[cfg(not(target_os = "macos"))]
+use crate::APP_TITLE;
+use fluent_bundle::FluentArgs;
 use gpui::{
     App, AppContext as _, Context, FocusHandle, Focusable, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, Styled, TitlebarOptions, Window,
@@ -26,7 +29,7 @@ pub(crate) fn open_about_window(cx: &mut App) {
     let _ = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::centered(window_size, cx)),
-            titlebar: Some(about_titlebar_options()),
+            titlebar: Some(about_titlebar_options(cx.global::<I18n>())),
             is_resizable: false,
             is_minimizable: false,
             kind: WindowKind::Normal,
@@ -50,23 +53,28 @@ fn about_window_size() -> gpui::Size<gpui::Pixels> {
     }
 }
 
-fn about_titlebar_options() -> TitlebarOptions {
-    #[cfg(target_os = "macos")]
-    {
-        TitlebarOptions {
-            title: None,
-            appears_transparent: true,
-            traffic_light_position: Some(about_traffic_light_position()),
-        }
+#[cfg(target_os = "macos")]
+fn about_titlebar_options(_i18n: &I18n) -> TitlebarOptions {
+    TitlebarOptions {
+        title: None,
+        appears_transparent: true,
+        traffic_light_position: Some(about_traffic_light_position()),
     }
+}
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        TitlebarOptions {
-            title: Some(format!("About {}", crate::APP_TITLE).into()),
-            ..Default::default()
-        }
+#[cfg(not(target_os = "macos"))]
+fn about_titlebar_options(i18n: &I18n) -> TitlebarOptions {
+    TitlebarOptions {
+        title: Some(about_window_title(i18n).into()),
+        ..Default::default()
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn about_window_title(i18n: &I18n) -> String {
+    let mut args = FluentArgs::new();
+    args.set("app_name", APP_TITLE);
+    i18n.t_with_args("about-window-title", &args)
 }
 
 #[cfg(target_os = "macos")]
@@ -119,6 +127,8 @@ impl Focusable for AboutWindow {
 
 impl Render for AboutWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let i18n = cx.global::<I18n>();
+
         v_flex()
             .id("about-window")
             .track_focus(&self.focus_handle)
@@ -156,7 +166,7 @@ impl Render for AboutWindow {
                                     .text_color(cx.theme().muted_foreground),
                             )
                             .child(
-                                Label::new("Currently in bootstrap and early-stage development.")
+                                Label::new(i18n.t("about-bootstrap-note"))
                                     .text_size(px(11.))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(cx.theme().muted_foreground),
@@ -168,12 +178,16 @@ impl Render for AboutWindow {
                             .gap_1()
                             .pt_2()
                             .child(
-                                Label::new(format!("Version {}", self.version))
+                                Label::new({
+                                    let mut args = FluentArgs::new();
+                                    args.set("version", self.version.as_ref());
+                                    i18n.t_with_args("about-version", &args)
+                                })
                                     .text_size(px(13.))
                                     .font_weight(FontWeight::SEMIBOLD),
                             )
                             .child(
-                                Label::new("Roadmap: connections, browsing, and editing.")
+                                Label::new(i18n.t("about-roadmap-note"))
                                     .text_size(px(10.5))
                                     .text_color(cx.theme().muted_foreground),
                             ),
@@ -183,13 +197,13 @@ impl Render for AboutWindow {
                 h_flex()
                     .gap_2()
                     .pt_2()
-                    .child(Button::new("about-docs").label("Docs").small().on_click({
+                    .child(Button::new("about-docs").label(i18n.t("about-docs")).small().on_click({
                         let docs_url = self.docs_url.clone();
                         move |_, _, cx: &mut App| cx.open_url(&docs_url)
                     }))
                     .child(
                         Button::new("about-github")
-                            .label("GitHub")
+                            .label(i18n.t("about-github"))
                             .small()
                             .on_click({
                                 let repository_url = self.repository_url.clone();
@@ -215,7 +229,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_about_titlebar_is_transparent_with_visible_traffic_lights() {
-        let titlebar = about_titlebar_options();
+        let titlebar = about_titlebar_options(&I18n::english_for_test());
 
         assert!(titlebar.title.is_none());
         assert!(titlebar.appears_transparent);
@@ -228,7 +242,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn non_macos_about_titlebar_keeps_system_title() {
-        let titlebar = about_titlebar_options();
+        let titlebar = about_titlebar_options(&I18n::english_for_test());
 
         assert_eq!(
             titlebar.title.as_ref().map(|title| title.as_ref()),
