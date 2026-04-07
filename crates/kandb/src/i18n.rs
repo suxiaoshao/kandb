@@ -88,11 +88,10 @@ fn locale_from_candidates(
     lang: Option<&str>,
     language: Option<&str>,
 ) -> Locale {
-    let locale = sys_locale
-        .or(lc_all)
-        .or(lang)
-        .or(language)
-        .and_then(normalize_locale);
+    let locale = [sys_locale, lc_all, lang, language]
+        .into_iter()
+        .flatten()
+        .find_map(normalize_locale);
 
     match locale.filter(|id| id.language.as_str() == "zh") {
         Some(_) => Locale::ZhCn,
@@ -143,6 +142,14 @@ mod tests {
     #[test]
     fn english_is_default_when_candidates_are_missing() {
         assert_eq!(locale_from_candidates(None, None, None, None), Locale::EnUs);
+    }
+
+    #[test]
+    fn invalid_earlier_locale_does_not_block_valid_later_locale() {
+        assert_eq!(
+            locale_from_candidates(None, Some("C"), Some("zh_CN.UTF-8"), None),
+            Locale::ZhCn
+        );
     }
 
     #[test]
