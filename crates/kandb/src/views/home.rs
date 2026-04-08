@@ -1,8 +1,10 @@
-mod sidebar_model;
+pub(crate) mod sidebar_model;
 mod sidebar_state;
 
 use self::{
-    sidebar_model::{SidebarIcon, SidebarNodeKind, SidebarTree, VisibleSidebarNode},
+    sidebar_model::{
+        SidebarIcon, SidebarNodeKind, SidebarTree, VisibleSidebarNode, persisted_connection_node_id,
+    },
     sidebar_state::SidebarState,
 };
 use crate::{
@@ -90,21 +92,21 @@ impl HomeView {
             .default_connection_id
             .as_deref();
         let valid_node_ids = tree.valid_node_ids();
+        let settled_connection_node_ids = self.sidebar_state.read(cx).settled_connection_node_ids();
         let default_expanded_node_ids = tree.default_expanded_node_ids(preferred_connection_id);
         let default_selected_node_id = tree
             .default_selected_node_id(preferred_connection_id)
             .map(ToOwned::to_owned);
 
-        if self.sidebar_state.read(cx).is_preload_settled() {
-            cx.global::<WorkspaceStore>().deref().clone().update(cx, |workspace, cx| {
-                workspace.ensure_initial_sidebar_state(
-                    &valid_node_ids,
-                    default_selected_node_id.as_deref(),
-                    &default_expanded_node_ids,
-                    cx,
-                );
-            });
-        }
+        cx.global::<WorkspaceStore>().deref().clone().update(cx, |workspace, cx| {
+            workspace.reconcile_sidebar_state(
+                &valid_node_ids,
+                &settled_connection_node_ids,
+                default_selected_node_id.as_deref(),
+                &default_expanded_node_ids,
+                cx,
+            );
+        });
 
         let expanded = cx
             .global::<WorkspaceStore>()
@@ -203,6 +205,7 @@ impl HomeView {
 
             if let Some(next_node) = visible.get(selected_index + 1)
                 && next_node.parent_id.as_deref() == Some(selected_node.id.as_str())
+                && next_node.selectable
             {
                 workspace.select_node(next_node.id.clone(), cx);
             }
@@ -222,15 +225,34 @@ impl HomeView {
             let next_index = tree
                 .find_visible_index(workspace.expanded_node_ids(), workspace.selected_node_id())
                 .map(|index| {
-                    if delta.is_negative() {
+                    let mut candidate = if delta.is_negative() {
                         index.saturating_sub(delta.unsigned_abs())
                     } else {
                         (index + delta as usize).min(visible.len().saturating_sub(1))
+                    };
+
+                    while candidate < visible.len() && !visible[candidate].selectable {
+                        if delta.is_negative() {
+                            if candidate == 0 {
+                                break;
+                            }
+                            candidate -= 1;
+                        } else {
+                            candidate += 1;
+                            if candidate >= visible.len() {
+                                candidate = visible.len().saturating_sub(1);
+                                break;
+                            }
+                        }
                     }
+
+                    candidate
                 })
                 .unwrap_or(0);
 
-            if let Some(next_node) = visible.get(next_index) {
+            if let Some(next_node) = visible.get(next_index)
+                && next_node.selectable
+            {
                 workspace.select_node(next_node.id.clone(), cx);
             }
         });
@@ -244,8 +266,11 @@ impl HomeView {
         let visible_nodes = tree.visible_nodes(&expanded_node_ids);
         let selected_connection_node_id = selected_node_id
             .as_deref()
-            .and_then(|node_id| tree.connection_node_id_for(node_id))
-            .map(ToOwned::to_owned);
+            .and_then(|node_id| {
+                tree.connection_node_id_for(node_id)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| persisted_connection_node_id(node_id))
+            });
         let delete_enabled = selected_node_id
             .as_deref()
             .is_some_and(|node_id| tree.is_connection_node(node_id));
@@ -573,13 +598,14 @@ fn render_sidebar_row(
                     ),
             )
         })
-        .cursor_pointer()
-        .on_click(move |_, window, cx| {
-            window.focus(&sidebar_focus_handle);
-            let workspace = cx.global::<WorkspaceStore>().deref().clone();
-            workspace.update(cx, |workspace, cx| workspace.select_node(node.id.clone(), cx));
-            let expanded = workspace.read(cx).expanded_node_ids().clone();
-            sidebar_state.update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
+        .when(node.selectable, |this| {
+            this.cursor_pointer().on_click(move |_, window, cx| {
+                window.focus(&sidebar_focus_handle);
+                let workspace = cx.global::<WorkspaceStore>().deref().clone();
+                workspace.update(cx, |workspace, cx| workspace.select_node(node.id.clone(), cx));
+                let expanded = workspace.read(cx).expanded_node_ids().clone();
+                sidebar_state.update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
+            })
         })
         .into_any_element()
 }
@@ -682,35 +708,41 @@ fn detail_row(label: String, value: SharedString, cx: &App) -> impl IntoElement 
 #[cfg(test)]
 mod tests {
     use super::{SidebarIcon, SidebarTree};
-    use crate::views::home::sidebar_model::{SidebarNode, SidebarNodeKind};
+    use crate::views::home::sidebar_model::{
+        SidebarEphemeralRow, SidebarNode, SidebarNodeKind, connection_node_id, namespace_node_id,
+        resource_node_id,
+    };
     use kandb_assets::{IconName, ProviderIconName};
 
     fn sample_tree() -> SidebarTree {
         SidebarTree::new(vec![SidebarNode {
-            id: "connection:local".into(),
+            id: connection_node_id("local"),
             label: "Local".into(),
             kind: SidebarNodeKind::Connection,
             icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
             parent_id: None,
             trailing_label: None,
             badge_count: None,
+            ephemeral_child: None,
             children: vec![SidebarNode {
-                id: "namespace:local:main".into(),
+                id: namespace_node_id("local", "main"),
                 label: "main".into(),
                 kind: SidebarNodeKind::Namespace,
                 icon: SidebarIcon::Lucide(IconName::HardDrive),
-                parent_id: Some("connection:local".into()),
+                parent_id: Some(connection_node_id("local")),
                 trailing_label: None,
                 badge_count: None,
+                ephemeral_child: None,
                 children: vec![SidebarNode {
-                    id: "resource:local:main:users".into(),
+                    id: resource_node_id("local", "main", "users"),
                     label: "users".into(),
                     kind: SidebarNodeKind::Resource,
                     icon: SidebarIcon::Lucide(IconName::Table),
-                    parent_id: Some("bucket:local:main:tables".into()),
+                    parent_id: Some("bucket".into()),
                     trailing_label: None,
                     badge_count: None,
                     children: Vec::new(),
+                    ephemeral_child: None,
                 }],
             }],
         }])
@@ -719,36 +751,41 @@ mod tests {
     #[::core::prelude::v1::test]
     fn refresh_target_uses_selected_connection() {
         let tree = sample_tree();
+        let connection_id = connection_node_id("local");
 
         assert_eq!(
-            tree.connection_node_id_for("connection:local"),
-            Some("connection:local")
+            tree.connection_node_id_for(&connection_id),
+            Some(connection_id.as_str())
         );
     }
 
     #[::core::prelude::v1::test]
     fn refresh_target_resolves_nested_node_to_connection() {
         let tree = sample_tree();
+        let resource_id = resource_node_id("local", "main", "users");
+        let connection_id = connection_node_id("local");
 
         assert_eq!(
-            tree.connection_node_id_for("resource:local:main:users"),
-            Some("connection:local")
+            tree.connection_node_id_for(&resource_id),
+            Some(connection_id.as_str())
         );
     }
 
     #[::core::prelude::v1::test]
     fn delete_only_enables_for_connection_node() {
         let tree = sample_tree();
+        let connection_id = connection_node_id("local");
+        let resource_id = resource_node_id("local", "main", "users");
 
-        assert!(tree.is_connection_node("connection:local"));
-        assert!(!tree.is_connection_node("resource:local:main:users"));
+        assert!(tree.is_connection_node(&connection_id));
+        assert!(!tree.is_connection_node(&resource_id));
     }
 
     #[::core::prelude::v1::test]
     fn default_selection_prefers_configured_connection() {
         let tree = SidebarTree::new(vec![
             SidebarNode {
-                id: "connection:first".into(),
+                id: connection_node_id("first"),
                 label: "First".into(),
                 kind: SidebarNodeKind::Connection,
                 icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
@@ -756,9 +793,10 @@ mod tests {
                 trailing_label: None,
                 badge_count: None,
                 children: Vec::new(),
+                ephemeral_child: None,
             },
             SidebarNode {
-                id: "connection:preferred".into(),
+                id: connection_node_id("preferred"),
                 label: "Preferred".into(),
                 kind: SidebarNodeKind::Connection,
                 icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
@@ -766,40 +804,41 @@ mod tests {
                 trailing_label: None,
                 badge_count: None,
                 children: Vec::new(),
+                ephemeral_child: None,
             },
         ]);
+        let preferred_id = connection_node_id("preferred");
 
         assert_eq!(
             tree.default_selected_node_id(Some("preferred")),
-            Some("connection:preferred")
+            Some(preferred_id.as_str())
         );
     }
 
     #[::core::prelude::v1::test]
     fn default_expansion_skips_loading_placeholder_children() {
         let tree = SidebarTree::new(vec![SidebarNode {
-            id: "connection:local".into(),
+            id: connection_node_id("local"),
             label: "Local".into(),
             kind: SidebarNodeKind::Connection,
             icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
             parent_id: None,
             trailing_label: None,
             badge_count: None,
-            children: vec![SidebarNode {
-                id: "connection:local:loading".into(),
+            children: Vec::new(),
+            ephemeral_child: Some(SidebarEphemeralRow {
+                id: "ephemeral-test".into(),
                 label: "Loading".into(),
                 kind: SidebarNodeKind::Loading,
                 icon: SidebarIcon::Lucide(IconName::SquareTerminal),
-                parent_id: Some("connection:local".into()),
+                parent_id: connection_node_id("local"),
                 trailing_label: None,
-                badge_count: None,
-                children: Vec::new(),
-            }],
+            }),
         }]);
 
         assert_eq!(
             tree.default_expanded_node_ids(None),
-            std::collections::BTreeSet::from(["connection:local".to_string()])
+            std::collections::BTreeSet::from([connection_node_id("local")])
         );
     }
 }
