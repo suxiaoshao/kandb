@@ -95,6 +95,17 @@ impl HomeView {
             .default_selected_node_id(preferred_connection_id)
             .map(ToOwned::to_owned);
 
+        if self.sidebar_state.read(cx).is_preload_settled() {
+            cx.global::<WorkspaceStore>().deref().clone().update(cx, |workspace, cx| {
+                workspace.ensure_initial_sidebar_state(
+                    &valid_node_ids,
+                    default_selected_node_id.as_deref(),
+                    &default_expanded_node_ids,
+                    cx,
+                );
+            });
+        }
+
         let expanded = cx
             .global::<WorkspaceStore>()
             .read(cx)
@@ -102,15 +113,6 @@ impl HomeView {
             .clone();
         self.sidebar_state
             .update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
-
-        cx.global::<WorkspaceStore>().deref().clone().update(cx, |workspace, cx| {
-            workspace.ensure_initial_sidebar_state(
-                &valid_node_ids,
-                default_selected_node_id.as_deref(),
-                &default_expanded_node_ids,
-                cx,
-            );
-        });
     }
 
     fn tree(&self, cx: &App) -> SidebarTree {
@@ -770,6 +772,34 @@ mod tests {
         assert_eq!(
             tree.default_selected_node_id(Some("preferred")),
             Some("connection:preferred")
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn default_expansion_skips_loading_placeholder_children() {
+        let tree = SidebarTree::new(vec![SidebarNode {
+            id: "connection:local".into(),
+            label: "Local".into(),
+            kind: SidebarNodeKind::Connection,
+            icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+            parent_id: None,
+            trailing_label: None,
+            badge_count: None,
+            children: vec![SidebarNode {
+                id: "connection:local:loading".into(),
+                label: "Loading".into(),
+                kind: SidebarNodeKind::Loading,
+                icon: SidebarIcon::Lucide(IconName::SquareTerminal),
+                parent_id: Some("connection:local".into()),
+                trailing_label: None,
+                badge_count: None,
+                children: Vec::new(),
+            }],
+        }]);
+
+        assert_eq!(
+            tree.default_expanded_node_ids(None),
+            std::collections::BTreeSet::from(["connection:local".to_string()])
         );
     }
 }

@@ -191,6 +191,10 @@ impl SidebarState {
         )
     }
 
+    pub(crate) fn is_preload_settled(&self) -> bool {
+        self.connections.iter().all(connection_preload_settled)
+    }
+
     fn build_connection_node(&self, connection: &ConnectionEntry, i18n: &I18n) -> SidebarNode {
         let id = connection_node_id(&connection.profile.id);
         SidebarNode {
@@ -936,6 +940,18 @@ fn resource_is_loading(resource: &ResourceEntry) -> bool {
     matches!(resource.structure, LoadState::Loading)
 }
 
+fn connection_preload_settled(connection: &ConnectionEntry) -> bool {
+    match &connection.status {
+        LoadState::Loaded(namespaces) => namespaces.iter().all(namespace_preload_settled),
+        LoadState::Error(_) | LoadState::Unsupported(_) => true,
+        LoadState::Unloaded | LoadState::Loading => false,
+    }
+}
+
+fn namespace_preload_settled(namespace: &NamespaceEntry) -> bool {
+    !matches!(namespace.resources, LoadState::Unloaded | LoadState::Loading)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1060,5 +1076,39 @@ mod tests {
         assert_eq!(state.connections.len(), 1);
         assert_eq!(state.connections[0].generation, 0);
         assert!(matches!(state.connections[0].status, LoadState::Unloaded));
+    }
+
+    #[test]
+    fn preload_is_not_settled_while_namespace_resources_are_loading() {
+        let state = SidebarState {
+            connections: vec![ConnectionEntry {
+                profile: ResolvedConnectionProfile {
+                    id: "local-main".into(),
+                    name: "Local Main".into(),
+                    provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
+                        location: SqliteLocation::Memory,
+                        read_only: false,
+                        create_if_missing: true,
+                    }),
+                },
+                generation: 0,
+                status: LoadState::Loaded(vec![NamespaceEntry {
+                    info: NamespaceInfo {
+                        id: "main".into(),
+                        name: "main".into(),
+                        kind: kandb_provider_core::NamespaceKind::Database,
+                        parent_id: None,
+                    },
+                    resources: LoadState::Loading,
+                }]),
+            }],
+        };
+
+        assert!(!state.is_preload_settled());
+    }
+
+    #[test]
+    fn preload_is_settled_once_namespace_resources_are_materialized() {
+        assert!(sample_state().is_preload_settled());
     }
 }

@@ -90,9 +90,17 @@ impl SidebarTree {
         let mut expanded = BTreeSet::new();
         if let Some(root) = self.preferred_root(preferred_connection_id) {
             expanded.insert(root.id.clone());
-            if let Some(first_namespace) = root.children.first() {
+            if let Some(first_namespace) = root
+                .children
+                .iter()
+                .find(|child| matches!(child.kind, SidebarNodeKind::Namespace))
+            {
                 expanded.insert(first_namespace.id.clone());
-                if let Some(first_bucket) = first_namespace.children.first() {
+                if let Some(first_bucket) = first_namespace
+                    .children
+                    .iter()
+                    .find(|child| matches!(child.kind, SidebarNodeKind::ResourceBucket))
+                {
                     expanded.insert(first_bucket.id.clone());
                 }
             }
