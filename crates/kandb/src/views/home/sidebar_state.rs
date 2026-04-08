@@ -199,7 +199,7 @@ impl SidebarState {
     pub(crate) fn settled_connection_node_ids(&self) -> BTreeSet<String> {
         self.connections
             .iter()
-            .filter(|connection| connection_preload_settled(connection))
+            .filter(|connection| connection_ready_for_reconcile(connection))
             .map(|connection| connection_node_id(&connection.profile.id))
             .collect()
     }
@@ -949,6 +949,10 @@ fn namespace_preload_settled(namespace: &NamespaceEntry) -> bool {
     !matches!(namespace.resources, LoadState::Unloaded | LoadState::Loading)
 }
 
+fn connection_ready_for_reconcile(connection: &ConnectionEntry) -> bool {
+    connection_preload_settled(connection) && !connection_is_loading(connection)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1115,5 +1119,45 @@ mod tests {
             sample_state().settled_connection_node_ids(),
             BTreeSet::from([connection_node_id("local-main")])
         );
+    }
+
+    #[test]
+    fn connection_is_not_ready_for_reconcile_while_resource_structure_is_loading() {
+        let state = SidebarState {
+            connections: vec![ConnectionEntry {
+                profile: ResolvedConnectionProfile {
+                    id: "local-main".into(),
+                    name: "Local Main".into(),
+                    provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
+                        location: SqliteLocation::Memory,
+                        read_only: false,
+                        create_if_missing: true,
+                    }),
+                },
+                generation: 0,
+                connection: None,
+                status: LoadState::Loaded(vec![NamespaceEntry {
+                    info: NamespaceInfo {
+                        id: "main".into(),
+                        name: "main".into(),
+                        kind: kandb_provider_core::NamespaceKind::Database,
+                        parent_id: None,
+                    },
+                    resources: LoadState::Loaded(vec![ResourceEntry {
+                        info: ResourceInfo {
+                            resource: ResourceRef {
+                                namespace_id: "main".into(),
+                                resource_id: "users".into(),
+                            },
+                            name: "users".into(),
+                            kind: ResourceKind::Table,
+                        },
+                        structure: LoadState::Loading,
+                    }]),
+                }]),
+            }],
+        };
+
+        assert!(state.settled_connection_node_ids().is_empty());
     }
 }

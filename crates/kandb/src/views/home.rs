@@ -85,6 +85,14 @@ impl HomeView {
         self.sidebar_state
             .update(cx, |state, cx| state.preload_all_connections(cx));
 
+        let expanded = cx
+            .global::<WorkspaceStore>()
+            .read(cx)
+            .expanded_node_ids()
+            .clone();
+        self.sidebar_state
+            .update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
+
         let tree = self.sidebar_state.read(cx).build_tree(cx.global::<I18n>());
         let preferred_connection_id = cx
             .global::<LoadedAppConfig>()
@@ -107,14 +115,6 @@ impl HomeView {
                 cx,
             );
         });
-
-        let expanded = cx
-            .global::<WorkspaceStore>()
-            .read(cx)
-            .expanded_node_ids()
-            .clone();
-        self.sidebar_state
-            .update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
     }
 
     fn tree(&self, cx: &App) -> SidebarTree {
