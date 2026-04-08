@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use kandb_provider_core::{
     Connection, FieldMeta, ListResourcesPage, ListResourcesRequest, LogicalType, NamespaceInfo,
     NamespaceKind, ProviderError, ProviderErrorKind, ProviderFactory, QueryResult, QueryRow,
-    ReadRequest, ResourceInfo, ResourceKind, ResourceReader, ResourceRef, Result, TextQueryBuilder,
-    TextQueryExecutor, Value,
+    ReadRequest, ResourceIndexInfo, ResourceInfo, ResourceKeyInfo, ResourceKeyKind,
+    ResourceKind, ResourceReader, ResourceRef, ResourceStructureIntrospector, Result,
+    TextQueryBuilder, TextQueryExecutor, Value,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -139,10 +140,6 @@ impl Connection for SqliteConnectionHandle {
 
                 for row in rows {
                     let name: String = row.try_get("name")?;
-                    if name.starts_with("sqlite_") {
-                        continue;
-                    }
-
                     if let Some(pattern) = pattern.as_deref()
                         && !like_matches(pattern, &name)
                     {
@@ -221,6 +218,10 @@ impl Connection for SqliteConnectionHandle {
     fn text_query_builder(&self) -> Option<&dyn TextQueryBuilder> {
         Some(self)
     }
+
+    fn resource_structure_introspector(&self) -> Option<&dyn ResourceStructureIntrospector> {
+        Some(self)
+    }
 }
 
 #[async_trait]
@@ -260,6 +261,56 @@ impl TextQueryBuilder for SqliteConnectionHandle {
     }
 }
 
+#[async_trait]
+impl ResourceStructureIntrospector for SqliteConnectionHandle {
+    async fn list_keys(&self, resource: &ResourceRef) -> Result<Option<Vec<ResourceKeyInfo>>> {
+        let indexes = self
+            .load_resource_indexes(resource)
+            .await
+            .map_err(|err| ProviderError::new(ProviderErrorKind::Metadata, err.to_string()))?;
+
+        Ok(Some(
+            indexes
+                .into_iter()
+                .filter_map(|index| match index.origin.as_str() {
+                    "pk" => Some(ResourceKeyInfo {
+                        name: normalize_key_name(index.name.as_deref()),
+                        kind: ResourceKeyKind::Primary,
+                        columns: index.columns,
+                    }),
+                    "u" => Some(ResourceKeyInfo {
+                        name: normalize_key_name(index.name.as_deref()),
+                        kind: ResourceKeyKind::Unique,
+                        columns: index.columns,
+                    }),
+                    _ => None,
+                })
+                .collect(),
+        ))
+    }
+
+    async fn list_indexes(
+        &self,
+        resource: &ResourceRef,
+    ) -> Result<Option<Vec<ResourceIndexInfo>>> {
+        let indexes = self
+            .load_resource_indexes(resource)
+            .await
+            .map_err(|err| ProviderError::new(ProviderErrorKind::Metadata, err.to_string()))?;
+
+        Ok(Some(
+            indexes
+                .into_iter()
+                .map(|index| ResourceIndexInfo {
+                    name: index.name.unwrap_or_else(|| "<unnamed>".to_string()),
+                    columns: index.columns,
+                    unique: index.unique,
+                })
+                .collect(),
+        ))
+    }
+}
+
 impl SqliteConnectionHandle {
     async fn with_connection<F, T>(&self, operation: F) -> std::result::Result<T, sqlx::Error>
     where
@@ -276,6 +327,76 @@ impl SqliteConnectionHandle {
 
     pub fn config(&self) -> &SqliteConfig {
         &self.config
+    }
+
+    async fn load_resource_indexes(
+        &self,
+        resource: &ResourceRef,
+    ) -> std::result::Result<Vec<SqliteIndexMeta>, sqlx::Error> {
+        let schema = quote_identifier(&resource.namespace_id);
+        let table = quote_pragma_argument(&resource.resource_id);
+        let index_list_sql = format!("PRAGMA {schema}.index_list({table})");
+
+        self.with_connection(|connection| {
+            Box::pin(async move {
+                let rows = sqlx::query(&index_list_sql)
+                    .fetch_all(&mut *connection)
+                    .await?;
+                let mut indexes = Vec::with_capacity(rows.len());
+
+                for row in rows {
+                    let name = row.try_get::<Option<String>, _>("name")?;
+                    let origin = row.try_get::<String, _>("origin")?;
+                    let unique = row.try_get::<i64, _>("unique")? != 0;
+                    let Some(index_name) = name.clone() else {
+                        continue;
+                    };
+
+                    let index_info_sql = format!(
+                        "PRAGMA {schema}.index_xinfo({})",
+                        quote_pragma_argument(&index_name)
+                    );
+                    let index_rows = sqlx::query(&index_info_sql).fetch_all(&mut *connection).await?;
+                    let mut columns = index_rows
+                        .into_iter()
+                        .filter_map(map_index_column_name)
+                        .collect::<Vec<_>>();
+                    columns.sort_by_key(|entry| entry.seqno);
+
+                    indexes.push(SqliteIndexMeta {
+                        name,
+                        origin,
+                        unique,
+                        columns: columns.into_iter().map(|entry| entry.name).collect(),
+                    });
+                }
+
+                Ok(indexes)
+            })
+        })
+        .await
+    }
+}
+
+#[derive(Debug)]
+struct SqliteIndexMeta {
+    name: Option<String>,
+    origin: String,
+    unique: bool,
+    columns: Vec<String>,
+}
+
+#[derive(Debug)]
+struct SqliteIndexColumnName {
+    seqno: i64,
+    name: String,
+}
+
+fn normalize_key_name(name: Option<&str>) -> Option<String> {
+    match name {
+        Some(name) if name.starts_with("sqlite_autoindex_") => None,
+        Some(name) => Some(name.to_string()),
+        None => None,
     }
 }
 
@@ -355,6 +476,23 @@ fn map_field_meta(row: SqliteRow) -> std::result::Result<FieldMeta, sqlx::Error>
             .filter(|value| *value > 0),
         hidden: Some(hidden != 0),
     })
+}
+
+fn map_index_column_name(row: SqliteRow) -> Option<SqliteIndexColumnName> {
+    let key = row.try_get::<i64, _>("key").ok()?;
+    if key == 0 {
+        return None;
+    }
+
+    let cid = row.try_get::<i64, _>("cid").ok()?;
+    if cid < 0 {
+        return None;
+    }
+
+    let seqno = row.try_get::<i64, _>("seqno").ok()?;
+    let name = row.try_get::<Option<String>, _>("name").ok()??;
+
+    Some(SqliteIndexColumnName { seqno, name })
 }
 
 fn map_logical_type(native_type: &str) -> LogicalType {
@@ -534,7 +672,9 @@ fn like_matches(pattern: &str, value: &str) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use kandb_provider_core::{build_read_all_query, execute_text_query, read_resource};
+    use kandb_provider_core::{
+        build_read_all_query, execute_text_query, read_resource, ResourceKeyKind,
+    };
     use tempfile::NamedTempFile;
 
     #[test]
@@ -677,10 +817,84 @@ mod tests {
                     .any(|item| item.name == "docs" && item.kind == ResourceKind::VirtualTable)
             );
             assert!(
-                !page
+                page
                     .items
                     .iter()
-                    .any(|item| item.name.starts_with("sqlite_"))
+                    .any(|item| item.name == "sqlite_schema" && item.kind == ResourceKind::Table)
+            );
+        });
+    }
+
+    #[test]
+    fn list_keys_and_indexes_include_unique_constraints_and_autoindexes() {
+        block_on(async {
+            let provider = SqliteProvider;
+            let connection = provider.connect(SqliteConfig::default()).await.unwrap();
+
+            execute_text_query(
+                &connection,
+                None,
+                "CREATE TABLE novel_tag (
+                    novel_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    PRIMARY KEY (novel_id, tag_id)
+                )",
+            )
+            .await
+            .unwrap();
+            execute_text_query(
+                &connection,
+                None,
+                "CREATE TABLE tag (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT UNIQUE
+                )",
+            )
+            .await
+            .unwrap();
+            execute_text_query(
+                &connection,
+                None,
+                "CREATE INDEX tag_name_manual_idx ON tag(name)",
+            )
+            .await
+            .unwrap();
+
+            let tag_resource = ResourceRef {
+                namespace_id: "main".into(),
+                resource_id: "tag".into(),
+            };
+            let tag_keys = connection.list_keys(&tag_resource).await.unwrap().unwrap();
+            let tag_indexes = connection.list_indexes(&tag_resource).await.unwrap().unwrap();
+
+            assert!(
+                tag_keys.iter().any(|key| key.name.is_none()
+                    && key.kind == ResourceKeyKind::Unique
+                    && key.columns == vec!["name".to_string()])
+            );
+            assert!(
+                tag_indexes.iter().any(|index| index.name == "sqlite_autoindex_tag_1"
+                    && index.columns == vec!["name".to_string()]
+                    && index.unique)
+            );
+            assert!(
+                tag_indexes.iter().any(|index| index.name == "tag_name_manual_idx"
+                    && index.columns == vec!["name".to_string()]
+                    && !index.unique)
+            );
+
+            let novel_tag_keys = connection
+                .list_keys(&ResourceRef {
+                    namespace_id: "main".into(),
+                    resource_id: "novel_tag".into(),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+
+            assert!(
+                novel_tag_keys.iter().any(|key| key.kind == ResourceKeyKind::Primary
+                    && key.columns == vec!["novel_id".to_string(), "tag_id".to_string()])
             );
         });
     }

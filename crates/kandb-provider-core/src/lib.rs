@@ -6,13 +6,14 @@ mod traits;
 pub use error::{ProviderError, ProviderErrorKind, Result};
 pub use model::{
     FieldMeta, ListResourcesPage, ListResourcesRequest, LogicalType, NamespaceInfo, NamespaceKind,
-    NativeValue, QueryResult, QueryRow, ReadRequest, ResourceInfo, ResourceKind, ResourceRef,
-    Value,
+    NativeValue, QueryResult, QueryRow, ReadRequest, ResourceIndexInfo, ResourceInfo,
+    ResourceKeyInfo, ResourceKeyKind, ResourceKind, ResourceRef, Value,
 };
 pub use registry::ProviderRegistry;
 pub use traits::{
-    Connection, ErasedProviderFactory, ProviderFactory, ResourceReader, TextQueryBuilder,
-    TextQueryExecutor, build_read_all_query, execute_text_query, read_resource,
+    Connection, ErasedProviderFactory, ProviderFactory, ResourceReader,
+    ResourceStructureIntrospector, TextQueryBuilder, TextQueryExecutor, build_read_all_query,
+    execute_text_query, list_indexes, list_keys, read_resource,
 };
 
 #[cfg(test)]
@@ -150,6 +151,10 @@ mod tests {
         fn text_query_builder(&self) -> Option<&dyn TextQueryBuilder> {
             Some(self)
         }
+
+        fn resource_structure_introspector(&self) -> Option<&dyn ResourceStructureIntrospector> {
+            Some(self)
+        }
     }
 
     #[async_trait]
@@ -234,6 +239,36 @@ mod tests {
                 "SELECT * FROM {}.{}",
                 resource.namespace_id, resource.resource_id
             )))
+        }
+    }
+
+    #[async_trait]
+    impl ResourceStructureIntrospector for MockConnection {
+        async fn list_keys(&self, resource: &ResourceRef) -> Result<Option<Vec<ResourceKeyInfo>>> {
+            if resource.resource_id == "documents" {
+                return Ok(None);
+            }
+
+            Ok(Some(vec![ResourceKeyInfo {
+                name: Some("users_pkey".into()),
+                kind: ResourceKeyKind::Primary,
+                columns: vec!["id".into()],
+            }]))
+        }
+
+        async fn list_indexes(
+            &self,
+            resource: &ResourceRef,
+        ) -> Result<Option<Vec<ResourceIndexInfo>>> {
+            if resource.resource_id == "documents" {
+                return Ok(None);
+            }
+
+            Ok(Some(vec![ResourceIndexInfo {
+                name: "users_name_idx".into(),
+                columns: vec!["name".into()],
+                unique: false,
+            }]))
         }
     }
 
@@ -412,6 +447,24 @@ mod tests {
                 .unwrap_err();
 
             assert_eq!(error.kind(), ProviderErrorKind::UnsupportedCapability);
+        });
+    }
+
+    #[test]
+    fn structure_metadata_is_available_via_capability_helpers() {
+        block_on(async {
+            let connection = MockConnection;
+            let resource = ResourceRef {
+                namespace_id: "public".into(),
+                resource_id: "users".into(),
+            };
+
+            let keys = list_keys(&connection, &resource).await.unwrap().unwrap();
+            let indexes = list_indexes(&connection, &resource).await.unwrap().unwrap();
+
+            assert_eq!(keys[0].kind, ResourceKeyKind::Primary);
+            assert_eq!(keys[0].columns, vec!["id".to_string()]);
+            assert_eq!(indexes[0].name, "users_name_idx");
         });
     }
 
