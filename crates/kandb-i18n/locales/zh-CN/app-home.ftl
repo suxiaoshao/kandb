@@ -1,0 +1,9 @@
+app-home-sidebar-title = 连接
+app-home-sidebar-refresh-all = 刷新全部连接
+app-home-sidebar-refresh-connection = 刷新当前连接
+app-home-sidebar-delete-connection = 删除当前连接（即将支持）
+app-home-sidebar-delete-select-connection = 请先选择一个连接（删除功能即将支持）
+app-home-sidebar-add-connection = 添加连接（即将支持）
+app-home-sidebar-loading = 加载中…
+app-home-sidebar-load-error = 元数据加载失败
+app-home-sidebar-provider-unsupported = 侧边栏暂不支持 `{$provider}` provider

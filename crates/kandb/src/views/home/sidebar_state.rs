@@ -1,12 +1,10 @@
 use super::sidebar_model::{
     SidebarChildren, SidebarIcon, SidebarNode, SidebarTree, connection_node_id, provider_node_id,
 };
-use crate::{
-    config::ResolvedConnectionProfile,
-    i18n::I18n,
-};
+use crate::{config::ResolvedConnectionProfile, i18n::I18n};
 use gpui::Context;
 use kandb_assets::{IconName, ProviderIconName};
+use kandb_i18n::FluentArgs;
 use kandb_provider_core::{Connection, IconToken, ProviderRegistry, TreeChildren, TreeNode};
 use kandb_provider_sqlite::SqlitePlugin;
 use std::sync::Arc;
@@ -60,11 +58,9 @@ impl SidebarState {
         locale: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(connection_index) = self
-            .connections
-            .iter()
-            .position(|connection| connection_node_id(&connection.profile.id) == target_connection_node_id)
-        else {
+        let Some(connection_index) = self.connections.iter().position(|connection| {
+            connection_node_id(&connection.profile.id) == target_connection_node_id
+        }) else {
             return;
         };
 
@@ -109,7 +105,10 @@ impl SidebarState {
         locale: &str,
         cx: &mut Context<Self>,
     ) {
-        if !matches!(self.connections[connection_index].status, LoadState::Unloaded) {
+        if !matches!(
+            self.connections[connection_index].status,
+            LoadState::Unloaded
+        ) {
             return;
         }
 
@@ -122,13 +121,9 @@ impl SidebarState {
         cx.spawn(async move |_, cx| {
             let result = connect_and_load_sidebar(profile.clone(), &locale).await;
             let _ = weak.update(cx, |state, cx| {
-                let Some(connection_index) = state
-                    .connections
-                    .iter()
-                    .position(|connection| {
-                        connection.profile.id == profile.id && connection.generation == generation
-                    })
-                else {
+                let Some(connection_index) = state.connections.iter().position(|connection| {
+                    connection.profile.id == profile.id && connection.generation == generation
+                }) else {
                     return;
                 };
 
@@ -158,7 +153,7 @@ fn build_connection_node(connection: &ConnectionEntry, i18n: &I18n) -> SidebarNo
             LoadState::Loading => vec![message_node(
                 &id,
                 "connection:loading",
-                i18n.t("sidebar-loading"),
+                i18n.t("app-home-sidebar-loading"),
             )],
             LoadState::Loaded(loaded) => loaded
                 .tree
@@ -169,13 +164,15 @@ fn build_connection_node(connection: &ConnectionEntry, i18n: &I18n) -> SidebarNo
             LoadState::Unsupported(provider) => vec![message_node(
                 &id,
                 "connection:unsupported",
-                i18n.t_with_args("sidebar-provider-unsupported", &{
-                    let mut args = fluent_bundle::FluentArgs::new();
+                i18n.t_with_args("app-home-sidebar-provider-unsupported", &{
+                    let mut args = FluentArgs::new();
                     args.set("provider", provider.as_str());
                     args
                 }),
             )],
-            LoadState::Error(message) => vec![message_node(&id, "connection:error", message.clone())],
+            LoadState::Error(message) => {
+                vec![message_node(&id, "connection:error", message.clone())]
+            }
         }),
     }
 }
@@ -287,7 +284,9 @@ mod tests {
         };
 
         let tree = state.build_tree(&I18n::english_for_test());
-        let visible = tree.visible_nodes(&std::collections::BTreeSet::from([connection_node_id("redis-local")]));
+        let visible = tree.visible_nodes(&std::collections::BTreeSet::from([connection_node_id(
+            "redis-local",
+        )]));
 
         assert!(visible.iter().any(|node| node.label.contains("redis")));
     }

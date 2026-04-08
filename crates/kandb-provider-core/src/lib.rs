@@ -185,7 +185,10 @@ mod tests {
         let leaf_json = serde_json::to_string(&leaf).unwrap();
         let branch_json = serde_json::to_string(&branch).unwrap();
 
-        assert_eq!(serde_json::from_str::<TreeChildren>(&leaf_json).unwrap(), leaf);
+        assert_eq!(
+            serde_json::from_str::<TreeChildren>(&leaf_json).unwrap(),
+            leaf
+        );
         assert_eq!(
             serde_json::from_str::<TreeChildren>(&branch_json).unwrap(),
             branch

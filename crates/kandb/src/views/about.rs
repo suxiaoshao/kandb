@@ -1,7 +1,6 @@
-use crate::{APP_ID, app_menus, i18n::I18n};
 #[cfg(not(target_os = "macos"))]
 use crate::APP_TITLE;
-use fluent_bundle::FluentArgs;
+use crate::{APP_ID, app_menus, i18n::I18n};
 use gpui::{
     App, AppContext as _, Context, FocusHandle, Focusable, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, Styled, TitlebarOptions, Window,
@@ -10,6 +9,7 @@ use gpui::{
 #[cfg(target_os = "macos")]
 use gpui::{Point, point};
 use gpui_component::{ActiveTheme, Sizable, button::Button, h_flex, label::Label, v_flex};
+use kandb_i18n::FluentArgs;
 
 pub(crate) fn open_about_window(cx: &mut App) {
     if let Some(existing) = cx
@@ -74,7 +74,7 @@ fn about_titlebar_options(i18n: &I18n) -> TitlebarOptions {
 fn about_window_title(i18n: &I18n) -> String {
     let mut args = FluentArgs::new();
     args.set("app_name", APP_TITLE);
-    i18n.t_with_args("about-window-title", &args)
+    i18n.t_with_args("app-about-window-title", &args)
 }
 
 #[cfg(target_os = "macos")]
@@ -95,7 +95,7 @@ impl AboutWindow {
         Self {
             focus_handle: cx.focus_handle(),
             version: env!("CARGO_PKG_VERSION").into(),
-            description: cx.global::<I18n>().t("about-description").into(),
+            description: cx.global::<I18n>().t("app-about-description").into(),
             docs_url: env!("CARGO_PKG_HOMEPAGE").into(),
             repository_url: env!("CARGO_PKG_REPOSITORY").into(),
         }
@@ -166,7 +166,7 @@ impl Render for AboutWindow {
                                     .text_color(cx.theme().muted_foreground),
                             )
                             .child(
-                                Label::new(i18n.t("about-bootstrap-note"))
+                                Label::new(i18n.t("app-about-bootstrap-note"))
                                     .text_size(px(11.))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(cx.theme().muted_foreground),
@@ -181,13 +181,13 @@ impl Render for AboutWindow {
                                 Label::new({
                                     let mut args = FluentArgs::new();
                                     args.set("version", self.version.as_ref());
-                                    i18n.t_with_args("about-version", &args)
+                                    i18n.t_with_args("app-about-version", &args)
                                 })
-                                    .text_size(px(13.))
-                                    .font_weight(FontWeight::SEMIBOLD),
+                                .text_size(px(13.))
+                                .font_weight(FontWeight::SEMIBOLD),
                             )
                             .child(
-                                Label::new(i18n.t("about-roadmap-note"))
+                                Label::new(i18n.t("app-about-roadmap-note"))
                                     .text_size(px(10.5))
                                     .text_color(cx.theme().muted_foreground),
                             ),
@@ -197,13 +197,18 @@ impl Render for AboutWindow {
                 h_flex()
                     .gap_2()
                     .pt_2()
-                    .child(Button::new("about-docs").label(i18n.t("about-docs")).small().on_click({
-                        let docs_url = self.docs_url.clone();
-                        move |_, _, cx: &mut App| cx.open_url(&docs_url)
-                    }))
+                    .child(
+                        Button::new("about-docs")
+                            .label(i18n.t("app-about-docs"))
+                            .small()
+                            .on_click({
+                                let docs_url = self.docs_url.clone();
+                                move |_, _, cx: &mut App| cx.open_url(&docs_url)
+                            }),
+                    )
                     .child(
                         Button::new("about-github")
-                            .label(i18n.t("about-github"))
+                            .label(i18n.t("app-about-github"))
                             .small()
                             .on_click({
                                 let repository_url = self.repository_url.clone();

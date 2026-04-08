@@ -11,6 +11,7 @@ repository = "https://github.com/suxiaoshao/kandb"
 async-compat.workspace = true
 async-lock.workspace = true
 async-trait.workspace = true
+kandb-i18n = { path = "../kandb-i18n" }
 kandb-provider-core = { path = "../kandb-provider-core" }
 serde.workspace = true
 serde_json.workspace = true

@@ -1,6 +1,7 @@
 use async_compat::Compat;
 use async_lock::Mutex;
 use async_trait::async_trait;
+use kandb_i18n::Translator;
 use kandb_provider_core::{
     Connection, ConnectionFormSchema, FormField, FormFieldKind, FormSelectOption, IconToken,
     ProviderError, ProviderErrorKind, ProviderPlugin, Result, SidebarTree, TreeChildren, TreeNode,
@@ -58,51 +59,45 @@ impl ProviderPlugin for SqlitePlugin {
     }
 
     fn connection_form(&self, locale: &str) -> ConnectionFormSchema {
+        let i18n = Translator::for_locale_tag(locale);
+
         ConnectionFormSchema {
-            title: t(locale, "SQLite Connection", "SQLite 连接"),
+            title: i18n.t("provider-sqlite-connection-title"),
             fields: vec![
                 FormField {
                     key: "location_kind".into(),
-                    label: t(locale, "Location", "位置"),
+                    label: i18n.t("provider-sqlite-field-location"),
                     kind: FormFieldKind::Select,
                     required: true,
-                    help_text: Some(t(
-                        locale,
-                        "Choose whether the database lives in memory, at a file path, or behind a SQLite URI.",
-                        "选择数据库位于内存、文件路径还是 SQLite URI。",
-                    )),
+                    help_text: Some(i18n.t("provider-sqlite-field-location-help")),
                     placeholder: None,
                     options: vec![
                         FormSelectOption {
                             value: "memory".into(),
-                            label: t(locale, "Memory", "内存"),
+                            label: i18n.t("provider-sqlite-option-memory"),
                         },
                         FormSelectOption {
                             value: "path".into(),
-                            label: t(locale, "Path", "路径"),
+                            label: i18n.t("provider-sqlite-option-path"),
                         },
                         FormSelectOption {
                             value: "uri".into(),
-                            label: t(locale, "URI", "URI"),
+                            label: i18n.t("provider-sqlite-option-uri"),
                         },
                     ],
                 },
                 FormField {
                     key: "location_value".into(),
-                    label: t(locale, "Path or URI", "路径或 URI"),
+                    label: i18n.t("provider-sqlite-field-location-value"),
                     kind: FormFieldKind::Path,
                     required: false,
-                    help_text: Some(t(
-                        locale,
-                        "Leave empty for in-memory databases.",
-                        "内存数据库可留空。",
-                    )),
+                    help_text: Some(i18n.t("provider-sqlite-field-location-value-help")),
                     placeholder: Some("file:app.db?mode=rwc".into()),
                     options: Vec::new(),
                 },
                 FormField {
                     key: "read_only".into(),
-                    label: t(locale, "Read Only", "只读"),
+                    label: i18n.t("provider-sqlite-field-read-only"),
                     kind: FormFieldKind::Checkbox,
                     required: false,
                     help_text: None,
@@ -111,7 +106,7 @@ impl ProviderPlugin for SqlitePlugin {
                 },
                 FormField {
                     key: "create_if_missing".into(),
-                    label: t(locale, "Create If Missing", "不存在时创建"),
+                    label: i18n.t("provider-sqlite-field-create-if-missing"),
                     kind: FormFieldKind::Checkbox,
                     required: false,
                     help_text: None,
@@ -158,13 +153,13 @@ impl Connection for SqliteConnectionHandle {
     }
 
     async fn load_sidebar(&self, locale: &str) -> Result<SidebarTree> {
-        let locale = locale.to_string();
+        let i18n = Translator::for_locale_tag(locale);
         self.with_connection(|connection| {
             Box::pin(async move {
                 let namespaces = load_namespaces(connection).await?;
                 let mut roots = Vec::with_capacity(namespaces.len());
                 for namespace in namespaces {
-                    roots.push(load_namespace_node(connection, &namespace, &locale).await?);
+                    roots.push(load_namespace_node(connection, &namespace, &i18n).await?);
                 }
                 Ok(SidebarTree { roots })
             })
@@ -273,11 +268,11 @@ async fn load_namespaces(
 async fn load_namespace_node(
     connection: &mut SqliteConnection,
     namespace: &NamespaceMeta,
-    locale: &str,
+    i18n: &Translator,
 ) -> std::result::Result<TreeNode, sqlx::Error> {
     let resources = load_resources(connection, &namespace.id).await?;
-    let table_nodes = load_resource_nodes(connection, namespace, &resources, locale, false).await?;
-    let view_nodes = load_resource_nodes(connection, namespace, &resources, locale, true).await?;
+    let table_nodes = load_resource_nodes(connection, namespace, &resources, i18n, false).await?;
+    let view_nodes = load_resource_nodes(connection, namespace, &resources, i18n, true).await?;
 
     let mut children = Vec::new();
     if !table_nodes.is_empty() {
@@ -286,7 +281,7 @@ async fn load_namespace_node(
                 namespace_id: namespace.id.clone(),
                 bucket: "tables".into(),
             }),
-            label: t(locale, "Tables", "表"),
+            label: i18n.t("provider-sqlite-sidebar-group-tables"),
             icon: IconToken::Folder,
             children: TreeChildren::Branch(table_nodes),
         });
@@ -297,7 +292,7 @@ async fn load_namespace_node(
                 namespace_id: namespace.id.clone(),
                 bucket: "views".into(),
             }),
-            label: t(locale, "Views", "视图"),
+            label: i18n.t("provider-sqlite-sidebar-group-views"),
             icon: IconToken::Folder,
             children: TreeChildren::Branch(view_nodes),
         });
@@ -337,7 +332,7 @@ async fn load_resource_nodes(
     connection: &mut SqliteConnection,
     namespace: &NamespaceMeta,
     resources: &[ResourceMeta],
-    locale: &str,
+    i18n: &Translator,
     views_only: bool,
 ) -> std::result::Result<Vec<TreeNode>, sqlx::Error> {
     let filtered = resources
@@ -347,7 +342,7 @@ async fn load_resource_nodes(
     let mut nodes = Vec::with_capacity(filtered.len());
 
     for resource in filtered {
-        nodes.push(load_resource_node(connection, namespace, resource, locale).await?);
+        nodes.push(load_resource_node(connection, namespace, resource, i18n).await?);
     }
 
     Ok(nodes)
@@ -357,7 +352,7 @@ async fn load_resource_node(
     connection: &mut SqliteConnection,
     namespace: &NamespaceMeta,
     resource: &ResourceMeta,
-    locale: &str,
+    i18n: &Translator,
 ) -> std::result::Result<TreeNode, sqlx::Error> {
     let fields = load_fields(connection, &namespace.id, &resource.name).await?;
     let keys = load_keys(connection, &namespace.id, &resource.name, &fields).await?;
@@ -371,7 +366,7 @@ async fn load_resource_node(
                 namespace_id: namespace.id.clone(),
                 bucket: format!("columns:{}", resource.name),
             }),
-            label: t(locale, "Columns", "列"),
+            label: i18n.t("provider-sqlite-sidebar-group-columns"),
             icon: IconToken::Folder,
             children: TreeChildren::Branch(
                 fields
@@ -399,7 +394,7 @@ async fn load_resource_node(
                 namespace_id: namespace.id.clone(),
                 bucket: format!("keys:{}", resource.name),
             }),
-            label: t(locale, "Keys", "键"),
+            label: i18n.t("provider-sqlite-sidebar-group-keys"),
             icon: IconToken::Folder,
             children: TreeChildren::Branch(
                 keys.into_iter()
@@ -410,7 +405,7 @@ async fn load_resource_node(
                             resource_name: resource.name.clone(),
                             key_signature: key_signature(index, &key),
                         }),
-                        label: key_label(locale, index, &key),
+                        label: key_label(i18n, index, &key),
                         icon: IconToken::Key,
                         children: TreeChildren::Leaf,
                     })
@@ -425,7 +420,7 @@ async fn load_resource_node(
                 namespace_id: namespace.id.clone(),
                 bucket: format!("indexes:{}", resource.name),
             }),
-            label: t(locale, "Indexes", "索引"),
+            label: i18n.t("provider-sqlite-sidebar-group-indexes"),
             icon: IconToken::Folder,
             children: TreeChildren::Branch(
                 indexes
@@ -436,7 +431,7 @@ async fn load_resource_node(
                             resource_name: resource.name.clone(),
                             index_name: index.name.clone(),
                         }),
-                        label: index_label(locale, &index),
+                        label: index_label(i18n, &index),
                         icon: IconToken::Index,
                         children: TreeChildren::Leaf,
                     })
@@ -512,21 +507,27 @@ async fn load_indexes(
     namespace_id: &str,
     resource_name: &str,
 ) -> std::result::Result<Vec<ResourceIndexMeta>, sqlx::Error> {
-    Ok(load_resource_indexes(connection, namespace_id, resource_name)
-        .await?
-        .into_iter()
-        .map(|index| ResourceIndexMeta {
-            name: index.name.unwrap_or_else(|| "<unnamed>".to_string()),
-            columns: index.columns,
-            unique: index.unique,
-        })
-        .collect())
+    Ok(
+        load_resource_indexes(connection, namespace_id, resource_name)
+            .await?
+            .into_iter()
+            .map(|index| ResourceIndexMeta {
+                name: index.name.unwrap_or_else(|| "<unnamed>".to_string()),
+                columns: index.columns,
+                unique: index.unique,
+            })
+            .collect(),
+    )
 }
 
 fn load_primary_key_from_fields(fields: &[FieldMeta]) -> Option<ResourceKeyMeta> {
     let mut primary_columns = fields
         .iter()
-        .filter_map(|field| field.primary_key_ordinal.map(|ordinal| (ordinal, field.name.clone())))
+        .filter_map(|field| {
+            field
+                .primary_key_ordinal
+                .map(|ordinal| (ordinal, field.name.clone()))
+        })
         .collect::<Vec<_>>();
 
     if primary_columns.is_empty() {
@@ -538,10 +539,7 @@ fn load_primary_key_from_fields(fields: &[FieldMeta]) -> Option<ResourceKeyMeta>
     Some(ResourceKeyMeta {
         name: None,
         kind: KeyKind::Primary,
-        columns: primary_columns
-            .into_iter()
-            .map(|(_, name)| name)
-            .collect(),
+        columns: primary_columns.into_iter().map(|(_, name)| name).collect(),
     })
 }
 
@@ -553,7 +551,9 @@ async fn load_resource_indexes(
     let schema = quote_identifier(namespace_id);
     let table = quote_pragma_argument(resource_name);
     let index_list_sql = format!("PRAGMA {schema}.index_list({table})");
-    let rows = sqlx::query(&index_list_sql).fetch_all(&mut *connection).await?;
+    let rows = sqlx::query(&index_list_sql)
+        .fetch_all(&mut *connection)
+        .await?;
     let mut indexes = Vec::with_capacity(rows.len());
 
     for row in rows {
@@ -568,7 +568,9 @@ async fn load_resource_indexes(
             "PRAGMA {schema}.index_xinfo({})",
             quote_pragma_argument(&index_name)
         );
-        let index_rows = sqlx::query(&index_info_sql).fetch_all(&mut *connection).await?;
+        let index_rows = sqlx::query(&index_info_sql)
+            .fetch_all(&mut *connection)
+            .await?;
         let mut columns = index_rows
             .into_iter()
             .filter_map(map_index_column_name)
@@ -668,23 +670,28 @@ fn normalize_key_name(name: Option<&str>) -> Option<String> {
     }
 }
 
-fn key_label(locale: &str, index: usize, key: &ResourceKeyMeta) -> String {
+fn key_label(i18n: &Translator, index: usize, key: &ResourceKeyMeta) -> String {
     let name = key.name.clone().unwrap_or_else(|| match key.kind {
-        KeyKind::Primary => match locale_prefix(locale) {
+        KeyKind::Primary => match i18n
+            .locale_tag()
+            .split('-')
+            .next()
+            .unwrap_or(i18n.locale_tag())
+        {
             "zh" => format!("键 #{}", index + 1),
             _ => format!("key #{}", index + 1),
         },
-        KeyKind::Unique => t(locale, "<unnamed>", "<未命名>"),
+        KeyKind::Unique => i18n.t("provider-sqlite-key-unnamed"),
     });
 
     format!("{name} ({})", key.columns.join(", "))
 }
 
-fn index_label(locale: &str, index: &ResourceIndexMeta) -> String {
+fn index_label(i18n: &Translator, index: &ResourceIndexMeta) -> String {
     let mut label = format!("{} ({})", index.name, index.columns.join(", "));
     if index.unique {
         label.push(' ');
-        label.push_str(&t(locale, "UNIQUE", "唯一"));
+        label.push_str(&i18n.t("provider-sqlite-key-unique"));
     }
     label
 }
@@ -694,7 +701,11 @@ fn key_signature(index: usize, key: &ResourceKeyMeta) -> String {
         KeyKind::Primary => "primary",
         KeyKind::Unique => "unique",
     };
-    format!("{kind}|{index}|{}|{}", key.name.as_deref().unwrap_or(""), key.columns.join("\u{1f}"))
+    format!(
+        "{kind}|{index}|{}|{}",
+        key.name.as_deref().unwrap_or(""),
+        key.columns.join("\u{1f}")
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -755,17 +766,6 @@ fn quote_identifier(identifier: &str) -> String {
 
 fn quote_pragma_argument(identifier: &str) -> String {
     format!("'{}'", identifier.replace('\'', "''"))
-}
-
-fn locale_prefix(locale: &str) -> &str {
-    locale.split(['-', '_']).next().unwrap_or(locale)
-}
-
-fn t(locale: &str, en: &str, zh: &str) -> String {
-    match locale_prefix(locale) {
-        "zh" => zh.to_string(),
-        _ => en.to_string(),
-    }
 }
 
 #[cfg(test)]

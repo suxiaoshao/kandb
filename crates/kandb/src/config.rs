@@ -250,7 +250,10 @@ fn toml_table_to_json(table: &toml::Table) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfigFile, CONFIG_FILE_NAME, StoredConnectionProfile, StoredSqliteConfig, StoredSqliteLocation};
+    use super::{
+        AppConfigFile, CONFIG_FILE_NAME, StoredConnectionProfile, StoredSqliteConfig,
+        StoredSqliteLocation,
+    };
     use crate::app_paths::AppPaths;
     use kandb_provider_sqlite::SqliteLocation;
     use std::{fs, path::PathBuf};

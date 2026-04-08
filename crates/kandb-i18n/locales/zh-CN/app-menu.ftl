@@ -1,0 +1,11 @@
+app-menu-about = 关于 {$app_name}
+app-menu-services = 服务
+app-menu-hide = 隐藏 {$app_name}
+app-menu-hide-others = 隐藏其他
+app-menu-show-all = 全部显示
+app-menu-quit = 退出 {$app_name}
+app-menu-file = 文件
+app-menu-close-window = 关闭窗口
+app-menu-window = 窗口
+app-menu-minimize = 最小化
+app-menu-zoom = 缩放

@@ -14,8 +14,9 @@ use crate::{
 };
 use gpui::{InteractiveElement as _, prelude::FluentBuilder as _, *};
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, Root, Sizable, Size, h_flex,
+    ActiveTheme, Disableable, Icon, Root, Sizable, Size,
     button::{Button, ButtonVariants},
+    h_flex,
     label::Label,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -248,10 +249,10 @@ impl HomeView {
         let i18n = cx.global::<I18n>();
         let refresh_tooltip = selected_connection_node_id
             .as_ref()
-            .map(|_| i18n.t("home-sidebar-refresh-connection"))
-            .unwrap_or_else(|| i18n.t("home-sidebar-refresh-all"));
-        let delete_tooltip = i18n.t("home-sidebar-delete-select-connection");
-        let add_tooltip = i18n.t("home-sidebar-add-connection");
+            .map(|_| i18n.t("app-home-sidebar-refresh-connection"))
+            .unwrap_or_else(|| i18n.t("app-home-sidebar-refresh-all"));
+        let delete_tooltip = i18n.t("app-home-sidebar-delete-select-connection");
+        let add_tooltip = i18n.t("app-home-sidebar-add-connection");
 
         div()
             .key_context(SIDEBAR_CONTEXT)
@@ -288,7 +289,11 @@ impl HomeView {
                                 move |_, _, cx| {
                                     sidebar_state.update(cx, |state, cx| {
                                         if let Some(connection_node_id) = target.as_deref() {
-                                            state.refresh_connection(connection_node_id, &locale, cx);
+                                            state.refresh_connection(
+                                                connection_node_id,
+                                                &locale,
+                                                cx,
+                                            );
                                         } else {
                                             state.refresh_all_connections(&locale, cx);
                                         }
@@ -321,7 +326,12 @@ impl HomeView {
                     .p_2()
                     .gap_1()
                     .children(visible_nodes.into_iter().map(|node| {
-                        self.render_sidebar_row(node, selected_node_id.as_deref(), sidebar_is_focused, cx)
+                        self.render_sidebar_row(
+                            node,
+                            selected_node_id.as_deref(),
+                            sidebar_is_focused,
+                            cx,
+                        )
                     })),
             )
     }
@@ -377,23 +387,20 @@ impl HomeView {
             .child(div().flex_none().child(self.render_disclosure(&node, cx)))
             .child(div().flex_none().child(render_icon(icon, cx)))
             .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .child(
-                        Label::new(node.label.clone())
-                            .text_sm()
-                            .text_color(cx.theme().foreground),
-                    ),
+                div().flex_1().min_w(px(0.0)).truncate().child(
+                    Label::new(node.label.clone())
+                        .text_sm()
+                        .text_color(cx.theme().foreground),
+                ),
             )
             .when(node.selectable, |this| {
                 let node_id = node.id.clone();
-                this.cursor_pointer().on_click(cx.listener(move |this, _, window, cx| {
-                    window.focus(&this.sidebar_focus_handle);
-                    this.selected_node_id = Some(node_id.clone());
-                    cx.notify();
-                }))
+                this.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        window.focus(&this.sidebar_focus_handle);
+                        this.selected_node_id = Some(node_id.clone());
+                        cx.notify();
+                    }))
             })
             .into_any_element()
     }
@@ -421,16 +428,17 @@ impl HomeView {
                 div().size(px(12.0)).into_any_element()
             })
             .when(expandable, |this| {
-                this.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    if expanded {
-                        this.expanded_node_ids.remove(id.as_str());
-                    } else {
-                        this.expanded_node_ids.insert(id.clone());
-                    }
-                    this.selected_node_id = Some(id.clone());
-                    cx.notify();
-                }))
+                this.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if expanded {
+                            this.expanded_node_ids.remove(id.as_str());
+                        } else {
+                            this.expanded_node_ids.insert(id.clone());
+                        }
+                        this.selected_node_id = Some(id.clone());
+                        cx.notify();
+                    }))
             })
     }
 }
@@ -535,7 +543,10 @@ mod tests {
         let nested = provider_node_id("local", "namespace:main");
         let connection = connection_node_id("local");
 
-        assert_eq!(tree.connection_node_id_for(&nested), Some(connection.as_str()));
+        assert_eq!(
+            tree.connection_node_id_for(&nested),
+            Some(connection.as_str())
+        );
     }
 
     #[test]

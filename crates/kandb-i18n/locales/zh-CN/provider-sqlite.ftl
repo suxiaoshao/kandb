@@ -1,0 +1,17 @@
+provider-sqlite-connection-title = SQLite 连接
+provider-sqlite-field-location = 位置
+provider-sqlite-field-location-help = 选择数据库位于内存、文件路径还是 SQLite URI。
+provider-sqlite-option-memory = 内存
+provider-sqlite-option-path = 路径
+provider-sqlite-option-uri = URI
+provider-sqlite-field-location-value = 路径或 URI
+provider-sqlite-field-location-value-help = 内存数据库可留空。
+provider-sqlite-field-read-only = 只读
+provider-sqlite-field-create-if-missing = 不存在时创建
+provider-sqlite-sidebar-group-tables = 表
+provider-sqlite-sidebar-group-views = 视图
+provider-sqlite-sidebar-group-columns = 列
+provider-sqlite-sidebar-group-keys = 键
+provider-sqlite-sidebar-group-indexes = 索引
+provider-sqlite-key-unnamed = <未命名>
+provider-sqlite-key-unique = 唯一

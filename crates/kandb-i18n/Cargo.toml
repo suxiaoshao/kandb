@@ -1,0 +1,13 @@
+[package]
+name = "kandb-i18n"
+version = "0.1.0"
+edition = "2024"
+description = "Shared i18n runtime and message resources for KanDB."
+license = "MIT"
+homepage = "https://github.com/suxiaoshao/kandb"
+repository = "https://github.com/suxiaoshao/kandb"
+
+[dependencies]
+fluent-bundle.workspace = true
+sys-locale.workspace = true
+unic-langid.workspace = true
