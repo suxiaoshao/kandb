@@ -142,7 +142,7 @@ pub(crate) struct StoredConnectionProfile {
 
 impl StoredConnectionProfile {
     fn resolve(&self, config_dir: &Path) -> KandbResult<ResolvedConnectionProfile> {
-        let provider = match self.provider.as_str() {
+        let config_json = match self.provider.as_str() {
             SQLITE_PROVIDER => {
                 let config = parse_sqlite_config(&self.config, config_dir).map_err(|message| {
                     KandbError::ProviderConfigDecode {
@@ -151,18 +151,16 @@ impl StoredConnectionProfile {
                         message,
                     }
                 })?;
-                ResolvedProviderConfig::Sqlite(config)
+                serde_json::to_value(config).expect("sqlite config should serialize")
             }
-            _ => ResolvedProviderConfig::Unknown {
-                provider: self.provider.clone(),
-                config: self.config.clone(),
-            },
+            _ => toml_table_to_json(&self.config),
         };
 
         Ok(ResolvedConnectionProfile {
             id: self.id.clone(),
             name: self.name.clone(),
-            provider,
+            provider_kind: self.provider.clone(),
+            config_json,
         })
     }
 }
@@ -171,16 +169,8 @@ impl StoredConnectionProfile {
 pub(crate) struct ResolvedConnectionProfile {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) provider: ResolvedProviderConfig,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ResolvedProviderConfig {
-    Sqlite(SqliteConfig),
-    Unknown {
-        provider: String,
-        config: toml::Table,
-    },
+    pub(crate) provider_kind: String,
+    pub(crate) config_json: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,12 +244,13 @@ fn resolve_path(config_dir: &Path, raw_path: &str) -> KandbResult<PathBuf> {
     Ok(config_dir.join(path))
 }
 
+fn toml_table_to_json(table: &toml::Table) -> serde_json::Value {
+    serde_json::to_value(table).expect("toml config table should serialize")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        AppConfigFile, CONFIG_FILE_NAME, ResolvedProviderConfig, StoredConnectionProfile,
-        StoredSqliteConfig, StoredSqliteLocation,
-    };
+    use super::{AppConfigFile, CONFIG_FILE_NAME, StoredConnectionProfile, StoredSqliteConfig, StoredSqliteLocation};
     use crate::app_paths::AppPaths;
     use kandb_provider_sqlite::SqliteLocation;
     use std::{fs, path::PathBuf};
@@ -360,21 +351,22 @@ mod tests {
             .resolve_connections(&paths)
             .expect("resolve connections");
 
-        assert!(matches!(
-            &resolved[0].provider,
-            ResolvedProviderConfig::Sqlite(config)
-                if config.location == SqliteLocation::Path(paths.config_dir().join("db/main.sqlite"))
-        ));
-        assert!(matches!(
-            &resolved[1].provider,
-            ResolvedProviderConfig::Sqlite(config) if config.location == SqliteLocation::Memory
-        ));
-        assert!(matches!(
-            &resolved[2].provider,
-            ResolvedProviderConfig::Sqlite(config)
-                if config.location
-                    == SqliteLocation::Uri("file:memdb1?mode=memory&cache=shared".to_string())
-        ));
+        let relative_config: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[0].config_json.clone()).unwrap();
+        let memory_config: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[1].config_json.clone()).unwrap();
+        let uri_config: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[2].config_json.clone()).unwrap();
+
+        assert_eq!(
+            relative_config.location,
+            SqliteLocation::Path(paths.config_dir().join("db/main.sqlite"))
+        );
+        assert_eq!(memory_config.location, SqliteLocation::Memory);
+        assert_eq!(
+            uri_config.location,
+            SqliteLocation::Uri("file:memdb1?mode=memory&cache=shared".to_string())
+        );
     }
 
     #[test]
@@ -430,11 +422,9 @@ mod tests {
         let expected_home = dirs_next::home_dir()
             .expect("home dir")
             .join("db/main.sqlite");
-        assert!(matches!(
-            &resolved[0].provider,
-            ResolvedProviderConfig::Sqlite(sqlite)
-                if sqlite.location == SqliteLocation::Path(expected_home)
-        ));
+        let sqlite: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[0].config_json.clone()).unwrap();
+        assert_eq!(sqlite.location, SqliteLocation::Path(expected_home));
     }
 
     fn sqlite_profile(id: &str, location: StoredSqliteLocation) -> StoredConnectionProfile {

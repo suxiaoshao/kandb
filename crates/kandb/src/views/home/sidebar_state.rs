@@ -1,21 +1,15 @@
 use super::sidebar_model::{
-    SidebarBucketKind, SidebarEphemeralRow, SidebarIcon, SidebarNode, SidebarNodeKind,
-    SidebarTree, bucket_node_id, child_bucket_node_id, connection_node_id, field_node_id,
-    index_node_id, index_signature, key_node_id, key_signature, namespace_node_id,
-    resource_node_id,
+    SidebarChildren, SidebarIcon, SidebarNode, SidebarTree, connection_node_id, provider_node_id,
 };
 use crate::{
-    config::{LoadedAppConfig, ResolvedConnectionProfile, ResolvedProviderConfig},
+    config::ResolvedConnectionProfile,
     i18n::I18n,
 };
 use gpui::Context;
 use kandb_assets::{IconName, ProviderIconName};
-use kandb_provider_core::{
-    Connection, FieldMeta, NamespaceInfo, ProviderFactory, ResourceIndexInfo, ResourceInfo,
-    ResourceKeyInfo, ResourceKind, ResourceRef,
-};
-use kandb_provider_sqlite::SqliteProvider;
-use std::{collections::BTreeSet, sync::Arc};
+use kandb_provider_core::{Connection, IconToken, ProviderRegistry, TreeChildren, TreeNode};
+use kandb_provider_sqlite::SqlitePlugin;
+use std::sync::Arc;
 
 pub(crate) struct SidebarState {
     connections: Vec<ConnectionEntry>,
@@ -24,271 +18,98 @@ pub(crate) struct SidebarState {
 struct ConnectionEntry {
     profile: ResolvedConnectionProfile,
     generation: u64,
-    connection: Option<Arc<dyn Connection>>,
-    status: LoadState<Vec<NamespaceEntry>>,
+    status: LoadState,
 }
 
-struct NamespaceEntry {
-    info: NamespaceInfo,
-    resources: LoadState<Vec<ResourceEntry>>,
-}
-
-struct ResourceEntry {
-    info: ResourceInfo,
-    structure: LoadState<ResourceStructure>,
-}
-
-struct ResourceStructure {
-    fields: Vec<FieldMeta>,
-    keys: Vec<ResourceKeyInfo>,
-    indexes: Vec<ResourceIndexInfo>,
-}
-
-enum LoadState<T> {
+enum LoadState {
     Unloaded,
     Loading,
-    Loaded(T),
-    Error(String),
+    Loaded(LoadedConnection),
     Unsupported(String),
+    Error(String),
+}
+
+struct LoadedConnection {
+    tree: kandb_provider_core::SidebarTree,
 }
 
 impl SidebarState {
-    pub(crate) fn from_config(config: &LoadedAppConfig) -> Self {
+    pub(crate) fn from_config(config: &[ResolvedConnectionProfile]) -> Self {
         Self {
             connections: config
-                .resolved_connections
                 .iter()
                 .cloned()
                 .map(|profile| ConnectionEntry {
                     profile,
                     generation: 0,
-                    connection: None,
                     status: LoadState::Unloaded,
                 })
                 .collect(),
         }
     }
 
-    pub(crate) fn preload_all_connections(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn preload_all_connections(&mut self, locale: &str, cx: &mut Context<Self>) {
         for connection_index in 0..self.connections.len() {
-            self.ensure_connection_preloaded(connection_index, cx);
+            self.ensure_connection_loaded(connection_index, locale, cx);
         }
     }
 
     pub(crate) fn refresh_connection(
         &mut self,
         target_connection_node_id: &str,
+        locale: &str,
         cx: &mut Context<Self>,
     ) {
         let Some(connection_index) = self
             .connections
             .iter()
-            .position(|connection| {
-                connection_node_id(&connection.profile.id) == target_connection_node_id
-            })
+            .position(|connection| connection_node_id(&connection.profile.id) == target_connection_node_id)
         else {
             return;
         };
 
-        self.reset_connection(connection_index);
-        self.ensure_connection_preloaded(connection_index, cx);
+        self.connections[connection_index].generation += 1;
+        self.connections[connection_index].status = LoadState::Unloaded;
+        self.ensure_connection_loaded(connection_index, locale, cx);
     }
 
-    pub(crate) fn refresh_all_connections(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refresh_all_connections(&mut self, locale: &str, cx: &mut Context<Self>) {
         for connection_index in 0..self.connections.len() {
-            self.reset_connection(connection_index);
-            self.ensure_connection_preloaded(connection_index, cx);
+            self.connections[connection_index].generation += 1;
+            self.connections[connection_index].status = LoadState::Unloaded;
+            self.ensure_connection_loaded(connection_index, locale, cx);
         }
     }
 
     pub(crate) fn is_connection_refreshing(&self, target_connection_node_id: &str) -> bool {
-        self.connections
-            .iter()
-            .find(|connection| {
-                connection_node_id(&connection.profile.id) == target_connection_node_id
-            })
-            .is_some_and(connection_is_loading)
+        self.connections.iter().any(|connection| {
+            connection_node_id(&connection.profile.id) == target_connection_node_id
+                && matches!(connection.status, LoadState::Loading)
+        })
     }
 
     pub(crate) fn is_any_refreshing(&self) -> bool {
-        self.connections.iter().any(connection_is_loading)
-    }
-
-    pub(crate) fn ensure_expanded_loaded(
-        &mut self,
-        expanded_node_ids: &BTreeSet<String>,
-        cx: &mut Context<Self>,
-    ) {
-        for connection_index in 0..self.connections.len() {
-            let connection_id = connection_node_id(&self.connections[connection_index].profile.id);
-            if expanded_node_ids.contains(&connection_id) {
-                self.ensure_connection_loaded(connection_index, cx);
-            }
-
-            let namespace_ids = match &self.connections[connection_index].status {
-                LoadState::Loaded(namespaces) => namespaces
-                    .iter()
-                    .enumerate()
-                    .map(|(index, namespace)| {
-                        (
-                            index,
-                            namespace_node_id(
-                                &self.connections[connection_index].profile.id,
-                                &namespace.info.id,
-                            ),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-                _ => Vec::new(),
-            };
-
-            for (namespace_index, namespace_id) in namespace_ids {
-                if expanded_node_ids.contains(&namespace_id) {
-                    self.ensure_namespace_loaded(connection_index, namespace_index, cx);
-                }
-            }
-
-            let resource_ids = match &self.connections[connection_index].status {
-                LoadState::Loaded(namespaces) => namespaces
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(namespace_index, namespace)| match &namespace.resources {
-                        LoadState::Loaded(resources) => resources
-                            .iter()
-                            .enumerate()
-                            .map(|(resource_index, resource)| {
-                                (
-                                    namespace_index,
-                                    resource_index,
-                                    resource_node_id(
-                                        &self.connections[connection_index].profile.id,
-                                        &namespace.info.id,
-                                        &resource.info.name,
-                                    ),
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                        _ => Vec::new(),
-                    })
-                    .collect::<Vec<_>>(),
-                _ => Vec::new(),
-            };
-
-            for (namespace_index, resource_index, resource_id) in resource_ids {
-                if expanded_node_ids.contains(&resource_id) {
-                    self.ensure_resource_structure_loaded(
-                        connection_index,
-                        namespace_index,
-                        resource_index,
-                        cx,
-                    );
-                }
-            }
-        }
+        self.connections
+            .iter()
+            .any(|connection| matches!(connection.status, LoadState::Loading))
     }
 
     pub(crate) fn build_tree(&self, i18n: &I18n) -> SidebarTree {
         SidebarTree::new(
             self.connections
                 .iter()
-                .map(|connection| self.build_connection_node(connection, i18n))
+                .map(|connection| build_connection_node(connection, i18n))
                 .collect(),
         )
     }
 
-    pub(crate) fn settled_connection_node_ids(&self) -> BTreeSet<String> {
-        self.connections
-            .iter()
-            .filter(|connection| connection_ready_for_reconcile(connection))
-            .map(|connection| connection_node_id(&connection.profile.id))
-            .collect()
-    }
-
-    fn build_connection_node(&self, connection: &ConnectionEntry, i18n: &I18n) -> SidebarNode {
-        let id = connection_node_id(&connection.profile.id);
-        SidebarNode {
-            id: id.clone(),
-            label: connection.profile.name.clone().into(),
-            kind: SidebarNodeKind::Connection,
-            icon: match connection.profile.provider {
-                ResolvedProviderConfig::Sqlite(_) => SidebarIcon::Provider(ProviderIconName::Sqlite),
-                ResolvedProviderConfig::Unknown { .. } => SidebarIcon::Lucide(IconName::Database),
-            },
-            parent_id: None,
-            children: match &connection.status {
-                LoadState::Unloaded | LoadState::Loading | LoadState::Error(_) | LoadState::Unsupported(_) => {
-                    Vec::new()
-                }
-                LoadState::Loaded(namespaces) => namespaces
-                    .iter()
-                    .map(|namespace| self.build_namespace_node(&connection.profile.id, namespace, i18n))
-                    .collect(),
-            },
-            trailing_label: None,
-            badge_count: match &connection.status {
-                LoadState::Loaded(namespaces) => Some(namespaces.len()),
-                _ => None,
-            },
-            ephemeral_child: match &connection.status {
-                LoadState::Loading => Some(loading_row(&id, i18n)),
-                LoadState::Error(message) | LoadState::Unsupported(message) => {
-                    Some(error_row(&id, message, i18n))
-                }
-                LoadState::Unloaded | LoadState::Loaded(_) => None,
-            },
-        }
-    }
-
-    fn build_namespace_node(
-        &self,
-        connection_id: &str,
-        namespace: &NamespaceEntry,
-        i18n: &I18n,
-    ) -> SidebarNode {
-        let id = namespace_node_id(connection_id, &namespace.info.id);
-        let parent_id = Some(connection_node_id(connection_id));
-
-        let children = match &namespace.resources {
-            LoadState::Unloaded | LoadState::Loading | LoadState::Error(_) | LoadState::Unsupported(_) => Vec::new(),
-            LoadState::Loaded(resources) => build_resource_bucket_nodes(connection_id, namespace, resources, i18n),
-        };
-
-        SidebarNode {
-            id: id.clone(),
-            label: namespace.info.name.clone().into(),
-            kind: SidebarNodeKind::Namespace,
-            icon: SidebarIcon::Lucide(IconName::HardDrive),
-            parent_id,
-            children,
-            trailing_label: None,
-            badge_count: None,
-            ephemeral_child: match &namespace.resources {
-                LoadState::Loading => Some(loading_row(&id, i18n)),
-                LoadState::Error(message) | LoadState::Unsupported(message) => {
-                    Some(error_row(&id, message, i18n))
-                }
-                LoadState::Unloaded | LoadState::Loaded(_) => None,
-            },
-        }
-    }
-
-    fn ensure_connection_preloaded(&mut self, connection_index: usize, cx: &mut Context<Self>) {
-        self.ensure_connection_loaded(connection_index, cx);
-
-        let namespace_count = match &self.connections[connection_index].status {
-            LoadState::Loaded(namespaces) => namespaces.len(),
-            _ => 0,
-        };
-
-        for namespace_index in 0..namespace_count {
-            self.ensure_namespace_loaded(connection_index, namespace_index, cx);
-        }
-    }
-
-    fn ensure_connection_loaded(&mut self, connection_index: usize, cx: &mut Context<Self>) {
-        if !matches!(self.connections[connection_index].status, LoadState::Unloaded)
-            || self.connections[connection_index].connection.is_some()
-        {
+    fn ensure_connection_loaded(
+        &mut self,
+        connection_index: usize,
+        locale: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.connections[connection_index].status, LoadState::Unloaded) {
             return;
         }
 
@@ -296,12 +117,14 @@ impl SidebarState {
         let weak = cx.entity().downgrade();
         let profile = self.connections[connection_index].profile.clone();
         let generation = self.connections[connection_index].generation;
+        let locale = locale.to_string();
+
         cx.spawn(async move |_, cx| {
-            let result = connect_and_load_namespaces(profile.clone()).await;
+            let result = connect_and_load_sidebar(profile.clone(), &locale).await;
             let _ = weak.update(cx, |state, cx| {
                 let Some(connection_index) = state
                     .connections
-                    .iter_mut()
+                    .iter()
                     .position(|connection| {
                         connection.profile.id == profile.id && connection.generation == generation
                     })
@@ -309,92 +132,9 @@ impl SidebarState {
                     return;
                 };
 
-                match result {
-                    Ok((connection, namespaces)) => {
-                        state.connections[connection_index].connection = Some(connection);
-                        state.connections[connection_index].status = LoadState::Loaded(
-                            namespaces
-                            .into_iter()
-                            .map(|info| NamespaceEntry {
-                                info,
-                                resources: LoadState::Unloaded,
-                            })
-                            .collect(),
-                        );
-                    }
-                    Err(LoadFailure::Unsupported(provider)) => {
-                        state.connections[connection_index].connection = None;
-                        state.connections[connection_index].status =
-                            LoadState::Unsupported(unsupported_provider_message(
-                                &provider,
-                                cx.global::<I18n>(),
-                            ));
-                    }
-                    Err(LoadFailure::Error(message)) => {
-                        state.connections[connection_index].connection = None;
-                        state.connections[connection_index].status = LoadState::Error(message);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn ensure_namespace_loaded(
-        &mut self,
-        connection_index: usize,
-        namespace_index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(connection) = self.connections[connection_index].connection.clone() else {
-            return;
-        };
-        let profile = self.connections[connection_index].profile.clone();
-        let generation = self.connections[connection_index].generation;
-        let Some(namespace) = self.namespace_mut(connection_index, namespace_index) else {
-            return;
-        };
-        if !matches!(namespace.resources, LoadState::Unloaded) {
-            return;
-        }
-
-        namespace.resources = LoadState::Loading;
-        let weak = cx.entity().downgrade();
-        let namespace_id = namespace.info.id.clone();
-
-        cx.spawn(async move |_, cx| {
-            let result = load_resources(connection.clone(), namespace_id.clone()).await;
-            let _ = weak.update(cx, |state, cx| {
-                let Some(connection) = state
-                    .connections
-                    .iter()
-                    .find(|connection| connection.profile.id == profile.id)
-                else {
-                    return;
-                };
-                if connection.generation != generation {
-                    return;
-                }
-
-                let Some(namespace) = state.namespace_mut_by_ids(&profile.id, &namespace_id) else {
-                    return;
-                };
-
-                namespace.resources = match result {
-                    Ok(resources) => LoadState::Loaded(
-                        resources
-                            .into_iter()
-                            .map(|info| ResourceEntry {
-                                info,
-                                structure: LoadState::Unloaded,
-                            })
-                            .collect(),
-                    ),
-                    Err(LoadFailure::Unsupported(provider)) => LoadState::Unsupported(
-                        unsupported_provider_message(&provider, cx.global::<I18n>()),
-                    ),
+                state.connections[connection_index].status = match result {
+                    Ok((_connection, tree)) => LoadState::Loaded(LoadedConnection { tree }),
+                    Err(LoadFailure::Unsupported(provider)) => LoadState::Unsupported(provider),
                     Err(LoadFailure::Error(message)) => LoadState::Error(message),
                 };
                 cx.notify();
@@ -403,429 +143,92 @@ impl SidebarState {
         .detach();
         cx.notify();
     }
-
-    fn ensure_resource_structure_loaded(
-        &mut self,
-        connection_index: usize,
-        namespace_index: usize,
-        resource_index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(connection) = self.connections[connection_index].connection.clone() else {
-            return;
-        };
-        let profile = self.connections[connection_index].profile.clone();
-        let generation = self.connections[connection_index].generation;
-        let Some(namespace) = self.namespace_mut(connection_index, namespace_index) else {
-            return;
-        };
-        let namespace_id = namespace.info.id.clone();
-        let Some(resource) = resource_mut(namespace, resource_index) else {
-            return;
-        };
-        if !matches!(resource.structure, LoadState::Unloaded) {
-            return;
-        }
-
-        resource.structure = LoadState::Loading;
-        let resource_name = resource.info.name.clone();
-        let resource_ref = resource.info.resource.clone();
-        let weak = cx.entity().downgrade();
-
-        cx.spawn(async move |_, cx| {
-            let result = load_resource_structure(connection.clone(), resource_ref).await;
-            let _ = weak.update(cx, |state, cx| {
-                let Some(connection) = state
-                    .connections
-                    .iter()
-                    .find(|connection| connection.profile.id == profile.id)
-                else {
-                    return;
-                };
-                if connection.generation != generation {
-                    return;
-                }
-
-                let Some(resource) = state.resource_mut_by_ids(&profile.id, &namespace_id, &resource_name)
-                else {
-                    return;
-                };
-
-                resource.structure = match result {
-                    Ok(structure) => LoadState::Loaded(structure),
-                    Err(LoadFailure::Unsupported(provider)) => LoadState::Unsupported(
-                        unsupported_provider_message(&provider, cx.global::<I18n>()),
-                    ),
-                    Err(LoadFailure::Error(message)) => LoadState::Error(message),
-                };
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn reset_connection(&mut self, connection_index: usize) {
-        self.connections[connection_index].generation += 1;
-        self.connections[connection_index].connection = None;
-        self.connections[connection_index].status = LoadState::Unloaded;
-    }
-
-    fn namespace_mut(
-        &mut self,
-        connection_index: usize,
-        namespace_index: usize,
-    ) -> Option<&mut NamespaceEntry> {
-        match &mut self.connections[connection_index].status {
-            LoadState::Loaded(namespaces) => namespaces.get_mut(namespace_index),
-            _ => None,
-        }
-    }
-
-    fn namespace_mut_by_ids(
-        &mut self,
-        connection_id: &str,
-        namespace_id: &str,
-    ) -> Option<&mut NamespaceEntry> {
-        let connection = self
-            .connections
-            .iter_mut()
-            .find(|connection| connection.profile.id == connection_id)?;
-        match &mut connection.status {
-            LoadState::Loaded(namespaces) => namespaces
-                .iter_mut()
-                .find(|namespace| namespace.info.id == namespace_id),
-            _ => None,
-        }
-    }
-
-    fn resource_mut_by_ids(
-        &mut self,
-        connection_id: &str,
-        namespace_id: &str,
-        resource_name: &str,
-    ) -> Option<&mut ResourceEntry> {
-        let namespace = self.namespace_mut_by_ids(connection_id, namespace_id)?;
-        match &mut namespace.resources {
-            LoadState::Loaded(resources) => resources
-                .iter_mut()
-                .find(|resource| resource.info.name == resource_name),
-            _ => None,
-        }
-    }
 }
 
-fn build_resource_bucket_nodes(
-    connection_id: &str,
-    namespace: &NamespaceEntry,
-    resources: &[ResourceEntry],
-    i18n: &I18n,
-) -> Vec<SidebarNode> {
-    let tables = resources
-        .iter()
-        .filter(|resource| classify_resource_kind(resource.info.kind) == SidebarBucketKind::Tables)
-        .collect::<Vec<_>>();
-    let views = resources
-        .iter()
-        .filter(|resource| classify_resource_kind(resource.info.kind) == SidebarBucketKind::Views)
-        .collect::<Vec<_>>();
-
-    let mut nodes = Vec::new();
-    if !tables.is_empty() {
-        let table_count = tables.len();
-        let id = bucket_node_id(connection_id, &namespace.info.id, SidebarBucketKind::Tables);
-        nodes.push(SidebarNode {
-            id: id.clone(),
-            label: i18n.t("sidebar-group-tables").into(),
-            kind: SidebarNodeKind::ResourceBucket,
-            icon: SidebarIcon::Lucide(IconName::FolderClosed),
-            parent_id: Some(namespace_node_id(connection_id, &namespace.info.id)),
-            children: tables
-                .iter()
-                .map(|resource| build_resource_node(connection_id, &namespace.info.id, resource, i18n))
-                .collect(),
-            trailing_label: None,
-            badge_count: Some(table_count),
-            ephemeral_child: None,
-        });
-    }
-
-    if !views.is_empty() {
-        let view_count = views.len();
-        let id = bucket_node_id(connection_id, &namespace.info.id, SidebarBucketKind::Views);
-        nodes.push(SidebarNode {
-            id: id.clone(),
-            label: i18n.t("sidebar-group-views").into(),
-            kind: SidebarNodeKind::ResourceBucket,
-            icon: SidebarIcon::Lucide(IconName::FolderClosed),
-            parent_id: Some(namespace_node_id(connection_id, &namespace.info.id)),
-            children: views
-                .iter()
-                .map(|resource| build_resource_node(connection_id, &namespace.info.id, resource, i18n))
-                .collect(),
-            trailing_label: None,
-            badge_count: Some(view_count),
-            ephemeral_child: None,
-        });
-    }
-
-    nodes
-}
-
-fn build_resource_child_bucket_nodes(
-    connection_id: &str,
-    namespace_id: &str,
-    resource_name: &str,
-    structure: &ResourceStructure,
-    i18n: &I18n,
-) -> Vec<SidebarNode> {
-    let mut nodes = Vec::new();
-
-    if !structure.fields.is_empty() {
-        let bucket_id = child_bucket_node_id(
-            connection_id,
-            namespace_id,
-            resource_name,
-            SidebarBucketKind::Columns,
-        );
-        nodes.push(SidebarNode {
-            id: bucket_id.clone(),
-            label: i18n.t("sidebar-group-columns").into(),
-            kind: SidebarNodeKind::ResourceChildBucket,
-            icon: SidebarIcon::Lucide(IconName::FolderClosed),
-            parent_id: Some(resource_node_id(connection_id, namespace_id, resource_name)),
-            children: structure
-                .fields
-                .iter()
-                .map(|field| SidebarNode {
-                    id: field_node_id(connection_id, namespace_id, resource_name, &field.name),
-                    label: field.name.clone().into(),
-                    kind: SidebarNodeKind::Field,
-                    icon: SidebarIcon::Lucide(IconName::Hash),
-                    parent_id: Some(bucket_id.clone()),
-                    children: Vec::new(),
-                    trailing_label: field_type_label(field).map(Into::into),
-                    badge_count: None,
-                    ephemeral_child: None,
-                })
-                .collect(),
-            trailing_label: None,
-            badge_count: Some(structure.fields.len()),
-            ephemeral_child: None,
-        });
-    }
-
-    if !structure.keys.is_empty() {
-        let bucket_id = child_bucket_node_id(
-            connection_id,
-            namespace_id,
-            resource_name,
-            SidebarBucketKind::Keys,
-        );
-        nodes.push(SidebarNode {
-            id: bucket_id.clone(),
-            label: i18n.t("sidebar-group-keys").into(),
-            kind: SidebarNodeKind::ResourceChildBucket,
-            icon: SidebarIcon::Lucide(IconName::FolderClosed),
-            parent_id: Some(resource_node_id(connection_id, namespace_id, resource_name)),
-            children: structure
-                .keys
-                .iter()
-                .enumerate()
-                .map(|(index, key)| SidebarNode {
-                    id: key_node_id(
-                        connection_id,
-                        namespace_id,
-                        resource_name,
-                        &key_signature(key_kind_slug(key), key.name.as_deref(), &key.columns),
-                    ),
-                    label: key_label(key, index, i18n).into(),
-                    kind: SidebarNodeKind::Key,
-                    icon: SidebarIcon::Lucide(IconName::KeyRound),
-                    parent_id: Some(bucket_id.clone()),
-                    children: Vec::new(),
-                    trailing_label: None,
-                    badge_count: None,
-                    ephemeral_child: None,
-                })
-                .collect(),
-            trailing_label: None,
-            badge_count: Some(structure.keys.len()),
-            ephemeral_child: None,
-        });
-    }
-
-    if !structure.indexes.is_empty() {
-        let bucket_id = child_bucket_node_id(
-            connection_id,
-            namespace_id,
-            resource_name,
-            SidebarBucketKind::Indexes,
-        );
-        nodes.push(SidebarNode {
-            id: bucket_id.clone(),
-            label: i18n.t("sidebar-group-indexes").into(),
-            kind: SidebarNodeKind::ResourceChildBucket,
-            icon: SidebarIcon::Lucide(IconName::FolderClosed),
-            parent_id: Some(resource_node_id(connection_id, namespace_id, resource_name)),
-            children: structure
-                .indexes
-                .iter()
-                .map(|item| SidebarNode {
-                    id: index_node_id(
-                        connection_id,
-                        namespace_id,
-                        resource_name,
-                        &index_signature(&item.name, &item.columns),
-                    ),
-                    label: index_label(item, i18n).into(),
-                    kind: SidebarNodeKind::Index,
-                    icon: SidebarIcon::Lucide(IconName::ListTree),
-                    parent_id: Some(bucket_id.clone()),
-                    children: Vec::new(),
-                    trailing_label: None,
-                    badge_count: None,
-                    ephemeral_child: None,
-                })
-                .collect(),
-            trailing_label: None,
-            badge_count: Some(structure.indexes.len()),
-            ephemeral_child: None,
-        });
-    }
-
-    nodes
-}
-
-fn build_resource_node(
-    connection_id: &str,
-    namespace_id: &str,
-    resource: &ResourceEntry,
-    i18n: &I18n,
-) -> SidebarNode {
-    let id = resource_node_id(connection_id, namespace_id, &resource.info.name);
-    let parent_id = Some(resource_bucket_parent_id(
-        connection_id,
-        namespace_id,
-        classify_resource_kind(resource.info.kind),
-    ));
-    let icon = match resource.info.kind {
-        ResourceKind::View => SidebarIcon::Lucide(IconName::Rows3),
-        _ => SidebarIcon::Lucide(IconName::Table),
-    };
-
-    let children = match &resource.structure {
-        LoadState::Unloaded | LoadState::Loading | LoadState::Error(_) | LoadState::Unsupported(_) => Vec::new(),
-        LoadState::Loaded(structure) => build_resource_child_bucket_nodes(
-            connection_id,
-            namespace_id,
-            &resource.info.name,
-            structure,
-            i18n,
-        ),
-    };
-
+fn build_connection_node(connection: &ConnectionEntry, i18n: &I18n) -> SidebarNode {
+    let id = connection_node_id(&connection.profile.id);
     SidebarNode {
         id: id.clone(),
-        label: resource.info.name.clone().into(),
-        kind: SidebarNodeKind::Resource,
-        icon,
-        parent_id,
-        children,
-        trailing_label: None,
-        badge_count: None,
-        ephemeral_child: match &resource.structure {
-            LoadState::Loading => Some(loading_row(&id, i18n)),
-            LoadState::Error(message) | LoadState::Unsupported(message) => {
-                Some(error_row(&id, message, i18n))
-            }
-            LoadState::Unloaded | LoadState::Loaded(_) => None,
+        label: connection.profile.name.clone(),
+        icon: provider_icon(&connection.profile.provider_kind),
+        parent_id: None,
+        selectable: true,
+        children: SidebarChildren::Branch(match &connection.status {
+            LoadState::Unloaded => Vec::new(),
+            LoadState::Loading => vec![message_node(
+                &id,
+                "connection:loading",
+                i18n.t("sidebar-loading"),
+            )],
+            LoadState::Loaded(loaded) => loaded
+                .tree
+                .roots
+                .iter()
+                .map(|node| map_provider_tree_node(&connection.profile.id, &id, node))
+                .collect(),
+            LoadState::Unsupported(provider) => vec![message_node(
+                &id,
+                "connection:unsupported",
+                i18n.t_with_args("sidebar-provider-unsupported", &{
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("provider", provider.as_str());
+                    args
+                }),
+            )],
+            LoadState::Error(message) => vec![message_node(&id, "connection:error", message.clone())],
+        }),
+    }
+}
+
+fn map_provider_tree_node(connection_id: &str, parent_id: &str, node: &TreeNode) -> SidebarNode {
+    let node_id = provider_node_id(connection_id, &node.id);
+    SidebarNode {
+        id: node_id.clone(),
+        label: node.label.clone(),
+        icon: map_icon(node.icon),
+        parent_id: Some(parent_id.to_string()),
+        selectable: true,
+        children: match &node.children {
+            TreeChildren::Leaf => SidebarChildren::Leaf,
+            TreeChildren::Branch(children) => SidebarChildren::Branch(
+                children
+                    .iter()
+                    .map(|child| map_provider_tree_node(connection_id, &node_id, child))
+                    .collect(),
+            ),
         },
     }
 }
 
-fn loading_row(parent_id: &str, i18n: &I18n) -> SidebarEphemeralRow {
-    SidebarEphemeralRow {
-        id: format!("ephemeral:{parent_id}:loading"),
-        label: i18n.t("sidebar-loading").into(),
-        kind: SidebarNodeKind::Loading,
+fn map_icon(icon: IconToken) -> SidebarIcon {
+    match icon {
+        IconToken::Database => SidebarIcon::Lucide(IconName::Database),
+        IconToken::Folder => SidebarIcon::Folder,
+        IconToken::HardDrive => SidebarIcon::Lucide(IconName::HardDrive),
+        IconToken::Table => SidebarIcon::Lucide(IconName::Table),
+        IconToken::View => SidebarIcon::Lucide(IconName::Rows3),
+        IconToken::Column => SidebarIcon::Lucide(IconName::Hash),
+        IconToken::Key => SidebarIcon::Lucide(IconName::KeyRound),
+        IconToken::Index => SidebarIcon::Lucide(IconName::ListTree),
+    }
+}
+
+fn provider_icon(provider_kind: &str) -> SidebarIcon {
+    match provider_kind {
+        "sqlite" => SidebarIcon::Provider(ProviderIconName::Sqlite),
+        _ => SidebarIcon::Lucide(IconName::Database),
+    }
+}
+
+fn message_node(parent_id: &str, suffix: &str, label: String) -> SidebarNode {
+    SidebarNode {
+        id: format!("{parent_id}:{suffix}"),
+        label,
         icon: SidebarIcon::Lucide(IconName::SquareTerminal),
-        parent_id: parent_id.to_string(),
-        trailing_label: None,
+        parent_id: Some(parent_id.to_string()),
+        selectable: false,
+        children: SidebarChildren::Leaf,
     }
-}
-
-fn error_row(parent_id: &str, message: &str, i18n: &I18n) -> SidebarEphemeralRow {
-    SidebarEphemeralRow {
-        id: format!("ephemeral:{parent_id}:error"),
-        label: i18n.t("sidebar-load-error").into(),
-        kind: SidebarNodeKind::Error,
-        icon: SidebarIcon::Lucide(IconName::SquareTerminal),
-        parent_id: parent_id.to_string(),
-        trailing_label: Some(message.to_owned().into()),
-    }
-}
-
-fn resource_bucket_parent_id(
-    connection_id: &str,
-    namespace_id: &str,
-    bucket: SidebarBucketKind,
-) -> String {
-    bucket_node_id(connection_id, namespace_id, bucket)
-}
-
-fn classify_resource_kind(kind: ResourceKind) -> SidebarBucketKind {
-    match kind {
-        ResourceKind::View => SidebarBucketKind::Views,
-        _ => SidebarBucketKind::Tables,
-    }
-}
-
-fn field_type_label(field: &FieldMeta) -> Option<String> {
-    field
-        .native_type
-        .clone()
-        .or_else(|| field.logical_type.map(|logical| format!("{logical:?}").to_ascii_lowercase()))
-}
-
-fn key_label(key: &ResourceKeyInfo, index: usize, i18n: &I18n) -> String {
-    let name = key.name.clone().unwrap_or_else(|| match key.kind {
-        kandb_provider_core::ResourceKeyKind::Primary => {
-            i18n.t_with_args("sidebar-key-generated-name", &{
-                let mut args = fluent_bundle::FluentArgs::new();
-                args.set("index", index + 1);
-                args
-            })
-        }
-        _ => i18n.t("sidebar-key-unnamed"),
-    });
-
-    format!("{name} ({})", key.columns.join(", "))
-}
-
-fn index_label(index: &ResourceIndexInfo, i18n: &I18n) -> String {
-    let mut label = format!("{} ({})", index.name, index.columns.join(", "));
-    if index.unique {
-        label.push(' ');
-        label.push_str(&i18n.t("sidebar-index-unique"));
-    }
-    label
-}
-
-fn key_kind_slug(key: &ResourceKeyInfo) -> &'static str {
-    match key.kind {
-        kandb_provider_core::ResourceKeyKind::Primary => "primary",
-        kandb_provider_core::ResourceKeyKind::Unique => "unique",
-        kandb_provider_core::ResourceKeyKind::Unknown => "unknown",
-    }
-}
-
-fn unsupported_provider_message(provider: &str, i18n: &I18n) -> String {
-    i18n.t_with_args("sidebar-provider-unsupported", &{
-        let mut args = fluent_bundle::FluentArgs::new();
-        args.set("provider", provider);
-        args
-    })
 }
 
 enum LoadFailure {
@@ -833,331 +236,59 @@ enum LoadFailure {
     Error(String),
 }
 
-async fn connect_and_load_namespaces(
+async fn connect_and_load_sidebar(
     profile: ResolvedConnectionProfile,
-) -> Result<(Arc<dyn Connection>, Vec<NamespaceInfo>), LoadFailure> {
-    let connection = connect_profile(&profile).await?;
-    let namespaces = connection
-        .list_namespaces()
+    locale: &str,
+) -> Result<(Arc<dyn Connection>, kandb_provider_core::SidebarTree), LoadFailure> {
+    let registry = provider_registry();
+    let Some(plugin) = registry.get(&profile.provider_kind) else {
+        return Err(LoadFailure::Unsupported(profile.provider_kind));
+    };
+
+    let connection = plugin
+        .connect_erased(profile.config_json.clone())
         .await
         .map_err(|error| LoadFailure::Error(error.to_string()))?;
-    Ok((connection, namespaces))
-}
-
-async fn load_resources(
-    connection: Arc<dyn Connection>,
-    namespace_id: String,
-) -> Result<Vec<ResourceInfo>, LoadFailure> {
-    connection
-        .list_resources(
-            &namespace_id,
-            kandb_provider_core::ListResourcesRequest::default(),
-        )
+    let connection: Arc<dyn Connection> = Arc::from(connection);
+    let tree = connection
+        .load_sidebar(locale)
         .await
-        .map(|page| page.items)
-        .map_err(|error| LoadFailure::Error(error.to_string()))
+        .map_err(|error| LoadFailure::Error(error.to_string()))?;
+
+    Ok((connection, tree))
 }
 
-async fn load_resource_structure(
-    connection: Arc<dyn Connection>,
-    resource: ResourceRef,
-) -> Result<ResourceStructure, LoadFailure> {
-    let fields = connection
-        .list_fields(&resource)
-        .await
-        .map_err(|error| LoadFailure::Error(error.to_string()))?
-        .unwrap_or_default();
-
-    let keys = if let Some(introspector) = connection.resource_structure_introspector() {
-        introspector
-            .list_keys(&resource)
-            .await
-            .map_err(|error| LoadFailure::Error(error.to_string()))?
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    let indexes = if let Some(introspector) = connection.resource_structure_introspector() {
-        introspector
-            .list_indexes(&resource)
-            .await
-            .map_err(|error| LoadFailure::Error(error.to_string()))?
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    Ok(ResourceStructure {
-        fields,
-        keys,
-        indexes,
-    })
-}
-
-async fn connect_profile(
-    profile: &ResolvedConnectionProfile,
-) -> Result<Arc<dyn Connection>, LoadFailure> {
-    match &profile.provider {
-        ResolvedProviderConfig::Sqlite(config) => SqliteProvider
-            .connect(config.clone())
-            .await
-            .map(|connection| Arc::new(connection) as Arc<dyn Connection>)
-            .map_err(|error| LoadFailure::Error(error.to_string())),
-        ResolvedProviderConfig::Unknown { provider, .. } => {
-            Err(LoadFailure::Unsupported(provider.clone()))
-        }
-    }
-}
-
-fn resource_mut(namespace: &mut NamespaceEntry, resource_index: usize) -> Option<&mut ResourceEntry> {
-    match &mut namespace.resources {
-        LoadState::Loaded(resources) => resources.get_mut(resource_index),
-        _ => None,
-    }
-}
-
-fn connection_is_loading(connection: &ConnectionEntry) -> bool {
-    match &connection.status {
-        LoadState::Loading => true,
-        LoadState::Loaded(namespaces) => namespaces.iter().any(namespace_is_loading),
-        LoadState::Unloaded | LoadState::Error(_) | LoadState::Unsupported(_) => false,
-    }
-}
-
-fn namespace_is_loading(namespace: &NamespaceEntry) -> bool {
-    match &namespace.resources {
-        LoadState::Loading => true,
-        LoadState::Loaded(resources) => resources.iter().any(resource_is_loading),
-        LoadState::Unloaded | LoadState::Error(_) | LoadState::Unsupported(_) => false,
-    }
-}
-
-fn resource_is_loading(resource: &ResourceEntry) -> bool {
-    matches!(resource.structure, LoadState::Loading)
-}
-
-fn connection_preload_settled(connection: &ConnectionEntry) -> bool {
-    match &connection.status {
-        LoadState::Loaded(namespaces) => namespaces.iter().all(namespace_preload_settled),
-        LoadState::Error(_) | LoadState::Unsupported(_) => true,
-        LoadState::Unloaded | LoadState::Loading => false,
-    }
-}
-
-fn namespace_preload_settled(namespace: &NamespaceEntry) -> bool {
-    !matches!(namespace.resources, LoadState::Unloaded | LoadState::Loading)
-}
-
-fn connection_ready_for_reconcile(connection: &ConnectionEntry) -> bool {
-    connection_preload_settled(connection) && !connection_is_loading(connection)
+fn provider_registry() -> ProviderRegistry {
+    let mut registry = ProviderRegistry::new();
+    registry
+        .register(Arc::new(SqlitePlugin))
+        .expect("sqlite provider should register exactly once");
+    registry
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        app_paths::AppPaths,
-        config::{AppConfigFile, LoadedAppConfig, StoredConnectionProfile},
-    };
-    use kandb_provider_sqlite::{SqliteConfig, SqliteLocation};
-    use std::path::PathBuf;
-
-    fn sample_state() -> SidebarState {
-        SidebarState {
-            connections: vec![ConnectionEntry {
-                profile: ResolvedConnectionProfile {
-                    id: "local-main".into(),
-                    name: "Local Main".into(),
-                    provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
-                        location: SqliteLocation::Memory,
-                        read_only: false,
-                        create_if_missing: true,
-                    }),
-                },
-                generation: 0,
-                connection: None,
-                status: LoadState::Loaded(vec![NamespaceEntry {
-                    info: NamespaceInfo {
-                        id: "main".into(),
-                        name: "main".into(),
-                        kind: kandb_provider_core::NamespaceKind::Database,
-                        parent_id: None,
-                    },
-                    resources: LoadState::Loaded(vec![
-                        ResourceEntry {
-                            info: ResourceInfo {
-                                resource: ResourceRef {
-                                    namespace_id: "main".into(),
-                                    resource_id: "sqlite_schema".into(),
-                                },
-                                name: "sqlite_schema".into(),
-                                kind: ResourceKind::Table,
-                            },
-                            structure: LoadState::Loaded(ResourceStructure {
-                                fields: vec![FieldMeta {
-                                    ordinal: Some(0),
-                                    name: "type".into(),
-                                    logical_type: Some(kandb_provider_core::LogicalType::Text),
-                                    native_type: Some("TEXT".into()),
-                                    nullable: Some(false),
-                                    default_value_sql: None,
-                                    primary_key_ordinal: None,
-                                    hidden: Some(false),
-                                }],
-                                keys: Vec::new(),
-                                indexes: Vec::new(),
-                            }),
-                        },
-                        ResourceEntry {
-                            info: ResourceInfo {
-                                resource: ResourceRef {
-                                    namespace_id: "main".into(),
-                                    resource_id: "user_names".into(),
-                                },
-                                name: "user_names".into(),
-                                kind: ResourceKind::View,
-                            },
-                            structure: LoadState::Unloaded,
-                        },
-                    ]),
-                }]),
-            }],
-        }
-    }
+    use crate::config::ResolvedConnectionProfile;
 
     #[test]
-    fn sqlite_schema_stays_in_tables_bucket() {
-        let tree = sample_state().build_tree(&I18n::english_for_test());
-        let visible = tree.visible_nodes(&tree.default_expanded_node_ids(None));
-
-        assert!(visible.iter().any(|node| {
-            node.id == resource_node_id("local-main", "main", "sqlite_schema")
-        }));
-        assert!(!visible.iter().any(|node| node.label == "System"));
-    }
-
-    #[test]
-    fn default_expansion_reaches_first_resource_bucket() {
-        let tree = sample_state().build_tree(&I18n::english_for_test());
-
-        assert_eq!(
-            tree.default_expanded_node_ids(None),
-            BTreeSet::from([
-                connection_node_id("local-main"),
-                namespace_node_id("local-main", "main"),
-                bucket_node_id("local-main", "main", SidebarBucketKind::Tables),
-            ])
-        );
-    }
-
-    #[test]
-    fn from_config_preserves_connection_roots() {
-        let config = LoadedAppConfig {
-            paths: AppPaths::from_roots(PathBuf::from("/tmp/config"), PathBuf::from("/tmp/data")),
-            file: AppConfigFile {
-                version: 1,
-                default_connection_id: Some("local-main".into()),
-                connections: vec![StoredConnectionProfile {
-                    id: "local-main".into(),
-                    name: "Local Main".into(),
-                    provider: "sqlite".into(),
-                    config: toml::Table::new(),
-                }],
-            },
-            resolved_connections: vec![ResolvedConnectionProfile {
-                id: "local-main".into(),
-                name: "Local Main".into(),
-                provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
-                    location: SqliteLocation::Memory,
-                    read_only: false,
-                    create_if_missing: true,
-                }),
-            }],
-        };
-
-        let state = SidebarState::from_config(&config);
-        assert_eq!(state.connections.len(), 1);
-        assert_eq!(state.connections[0].generation, 0);
-        assert!(state.connections[0].connection.is_none());
-        assert!(matches!(state.connections[0].status, LoadState::Unloaded));
-    }
-
-    #[test]
-    fn preload_is_not_settled_while_namespace_resources_are_loading() {
+    fn unsupported_provider_is_rendered_as_message_child() {
         let state = SidebarState {
             connections: vec![ConnectionEntry {
                 profile: ResolvedConnectionProfile {
-                    id: "local-main".into(),
-                    name: "Local Main".into(),
-                    provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
-                        location: SqliteLocation::Memory,
-                        read_only: false,
-                        create_if_missing: true,
-                    }),
+                    id: "redis-local".into(),
+                    name: "Redis Local".into(),
+                    provider_kind: "redis".into(),
+                    config_json: serde_json::json!({}),
                 },
                 generation: 0,
-                connection: None,
-                status: LoadState::Loaded(vec![NamespaceEntry {
-                    info: NamespaceInfo {
-                        id: "main".into(),
-                        name: "main".into(),
-                        kind: kandb_provider_core::NamespaceKind::Database,
-                        parent_id: None,
-                    },
-                    resources: LoadState::Loading,
-                }]),
+                status: LoadState::Unsupported("redis".into()),
             }],
         };
 
-        assert!(state.settled_connection_node_ids().is_empty());
-    }
+        let tree = state.build_tree(&I18n::english_for_test());
+        let visible = tree.visible_nodes(&std::collections::BTreeSet::from([connection_node_id("redis-local")]));
 
-    #[test]
-    fn preload_is_settled_once_namespace_resources_are_materialized() {
-        assert_eq!(
-            sample_state().settled_connection_node_ids(),
-            BTreeSet::from([connection_node_id("local-main")])
-        );
-    }
-
-    #[test]
-    fn connection_is_not_ready_for_reconcile_while_resource_structure_is_loading() {
-        let state = SidebarState {
-            connections: vec![ConnectionEntry {
-                profile: ResolvedConnectionProfile {
-                    id: "local-main".into(),
-                    name: "Local Main".into(),
-                    provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
-                        location: SqliteLocation::Memory,
-                        read_only: false,
-                        create_if_missing: true,
-                    }),
-                },
-                generation: 0,
-                connection: None,
-                status: LoadState::Loaded(vec![NamespaceEntry {
-                    info: NamespaceInfo {
-                        id: "main".into(),
-                        name: "main".into(),
-                        kind: kandb_provider_core::NamespaceKind::Database,
-                        parent_id: None,
-                    },
-                    resources: LoadState::Loaded(vec![ResourceEntry {
-                        info: ResourceInfo {
-                            resource: ResourceRef {
-                                namespace_id: "main".into(),
-                                resource_id: "users".into(),
-                            },
-                            name: "users".into(),
-                            kind: ResourceKind::Table,
-                        },
-                        structure: LoadState::Loading,
-                    }]),
-                }]),
-            }],
-        };
-
-        assert!(state.settled_connection_node_ids().is_empty());
+        assert!(visible.iter().any(|node| node.label.contains("redis")));
     }
 }

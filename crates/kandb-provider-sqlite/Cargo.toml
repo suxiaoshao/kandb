@@ -13,6 +13,7 @@ async-lock.workspace = true
 async-trait.workspace = true
 kandb-provider-core = { path = "../kandb-provider-core" }
 serde.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 
 [dev-dependencies]

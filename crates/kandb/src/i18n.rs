@@ -41,6 +41,13 @@ impl I18n {
         self.translate(key, Some(args))
     }
 
+    pub(crate) fn locale_tag(&self) -> &'static str {
+        match self.locale {
+            Locale::EnUs => "en-US",
+            Locale::ZhCn => "zh-CN",
+        }
+    }
+
     fn translate(&self, key: &str, args: Option<&FluentArgs<'_>>) -> String {
         let Some(bundle) = self.bundle() else {
             return key.to_string();
