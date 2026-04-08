@@ -19,8 +19,6 @@ const SQLITE_PROVIDER: &str = "sqlite";
 pub(crate) struct AppConfigFile {
     pub(crate) version: u32,
     #[serde(default)]
-    pub(crate) default_connection_id: Option<String>,
-    #[serde(default)]
     pub(crate) connections: Vec<StoredConnectionProfile>,
 }
 
@@ -37,7 +35,6 @@ impl Default for AppConfigFile {
     fn default() -> Self {
         Self {
             version: CONFIG_VERSION,
-            default_connection_id: None,
             connections: Vec::new(),
         }
     }
@@ -106,13 +103,6 @@ impl AppConfigFile {
 
             connection.resolve(paths.config_dir())?;
         }
-
-        if let Some(default_id) = &self.default_connection_id
-            && !self.connections.iter().any(|conn| conn.id == *default_id)
-        {
-            return Err(KandbError::MissingDefaultConnection(default_id.clone()));
-        }
-
         Ok(())
     }
 }
@@ -294,7 +284,6 @@ mod tests {
             AppPaths::from_roots(temp_dir.path().join("config"), temp_dir.path().join("data"));
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: None,
             connections: vec![
                 sqlite_profile("main", StoredSqliteLocation::Memory),
                 sqlite_profile("main", StoredSqliteLocation::Memory),
@@ -305,23 +294,6 @@ mod tests {
 
         let error = AppConfigFile::load_or_create(&paths).expect_err("duplicate id should fail");
         assert!(error.to_string().contains("duplicate connection id"));
-    }
-
-    #[test]
-    fn missing_default_connection_is_rejected() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let paths =
-            AppPaths::from_roots(temp_dir.path().join("config"), temp_dir.path().join("data"));
-        let config = AppConfigFile {
-            version: 1,
-            default_connection_id: Some("missing".to_string()),
-            connections: vec![sqlite_profile("main", StoredSqliteLocation::Memory)],
-        };
-
-        config.save(&paths).expect("save config");
-
-        let error = AppConfigFile::load_or_create(&paths).expect_err("missing default should fail");
-        assert!(error.to_string().contains("default connection"));
     }
 
     #[test]
@@ -344,7 +316,6 @@ mod tests {
         );
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: Some("relative".to_string()),
             connections: vec![relative, memory, uri],
         };
 
@@ -384,7 +355,6 @@ mod tests {
         );
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: Some("redis-local".to_string()),
             connections: vec![StoredConnectionProfile {
                 id: "redis-local".to_string(),
                 name: "Redis Local".to_string(),
@@ -409,7 +379,6 @@ mod tests {
             AppPaths::from_roots(temp_dir.path().join("config"), temp_dir.path().join("data"));
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: Some("main".to_string()),
             connections: vec![sqlite_profile(
                 "main",
                 StoredSqliteLocation::Path {
