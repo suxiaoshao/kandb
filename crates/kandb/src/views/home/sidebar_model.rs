@@ -122,6 +122,21 @@ impl SidebarTree {
             .into_iter()
             .find(|node| node.id == node_id)
     }
+
+    pub(crate) fn is_connection_node(&self, node_id: &str) -> bool {
+        self.find_node(node_id)
+            .is_some_and(|node| matches!(node.kind, SidebarNodeKind::Connection))
+    }
+
+    pub(crate) fn connection_node_id_for(&self, node_id: &str) -> Option<&str> {
+        self.roots
+            .iter()
+            .find_map(|root| find_connection_node_id(root, node_id))
+    }
+
+    fn find_node(&self, node_id: &str) -> Option<&SidebarNode> {
+        self.roots.iter().find_map(|root| find_node(root, node_id))
+    }
 }
 
 fn collect_node_ids(node: &SidebarNode, ids: &mut BTreeSet<String>) {
@@ -158,4 +173,31 @@ fn append_visible_nodes(
     for child in &node.children {
         append_visible_nodes(child, depth + 1, expanded_node_ids, visible);
     }
+}
+
+fn find_node<'a>(node: &'a SidebarNode, node_id: &str) -> Option<&'a SidebarNode> {
+    if node.id == node_id {
+        return Some(node);
+    }
+
+    node.children
+        .iter()
+        .find_map(|child| find_node(child, node_id))
+}
+
+fn find_connection_node_id<'a>(node: &'a SidebarNode, target_id: &str) -> Option<&'a str> {
+    let is_connection = matches!(node.kind, SidebarNodeKind::Connection);
+    if node.id == target_id {
+        return is_connection.then_some(node.id.as_str());
+    }
+
+    if node
+        .children
+        .iter()
+        .any(|child| find_node(child, target_id).is_some())
+    {
+        return is_connection.then_some(node.id.as_str());
+    }
+
+    None
 }

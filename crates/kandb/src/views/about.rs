@@ -95,7 +95,7 @@ impl AboutWindow {
         Self {
             focus_handle: cx.focus_handle(),
             version: env!("CARGO_PKG_VERSION").into(),
-            description: env!("CARGO_PKG_DESCRIPTION").into(),
+            description: cx.global::<I18n>().t("about-description").into(),
             docs_url: env!("CARGO_PKG_HOMEPAGE").into(),
             repository_url: env!("CARGO_PKG_REPOSITORY").into(),
         }

@@ -20,6 +20,7 @@ pub(crate) struct SidebarState {
 
 struct ConnectionEntry {
     profile: ResolvedConnectionProfile,
+    generation: u64,
     status: LoadState<Vec<NamespaceEntry>>,
 }
 
@@ -56,10 +57,56 @@ impl SidebarState {
                 .cloned()
                 .map(|profile| ConnectionEntry {
                     profile,
+                    generation: 0,
                     status: LoadState::Unloaded,
                 })
                 .collect(),
         }
+    }
+
+    pub(crate) fn preload_all_connections(&mut self, cx: &mut Context<Self>) {
+        for connection_index in 0..self.connections.len() {
+            self.ensure_connection_preloaded(connection_index, cx);
+        }
+    }
+
+    pub(crate) fn refresh_connection(
+        &mut self,
+        target_connection_node_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection_index) = self
+            .connections
+            .iter()
+            .position(|connection| {
+                connection_node_id(&connection.profile.id) == target_connection_node_id
+            })
+        else {
+            return;
+        };
+
+        self.reset_connection(connection_index);
+        self.ensure_connection_preloaded(connection_index, cx);
+    }
+
+    pub(crate) fn refresh_all_connections(&mut self, cx: &mut Context<Self>) {
+        for connection_index in 0..self.connections.len() {
+            self.reset_connection(connection_index);
+            self.ensure_connection_preloaded(connection_index, cx);
+        }
+    }
+
+    pub(crate) fn is_connection_refreshing(&self, target_connection_node_id: &str) -> bool {
+        self.connections
+            .iter()
+            .find(|connection| {
+                connection_node_id(&connection.profile.id) == target_connection_node_id
+            })
+            .is_some_and(connection_is_loading)
+    }
+
+    pub(crate) fn is_any_refreshing(&self) -> bool {
+        self.connections.iter().any(connection_is_loading)
     }
 
     pub(crate) fn ensure_expanded_loaded(
@@ -204,6 +251,19 @@ impl SidebarState {
         }
     }
 
+    fn ensure_connection_preloaded(&mut self, connection_index: usize, cx: &mut Context<Self>) {
+        self.ensure_connection_loaded(connection_index, cx);
+
+        let namespace_count = match &self.connections[connection_index].status {
+            LoadState::Loaded(namespaces) => namespaces.len(),
+            _ => 0,
+        };
+
+        for namespace_index in 0..namespace_count {
+            self.ensure_namespace_loaded(connection_index, namespace_index, cx);
+        }
+    }
+
     fn ensure_connection_loaded(&mut self, connection_index: usize, cx: &mut Context<Self>) {
         if !matches!(self.connections[connection_index].status, LoadState::Unloaded) {
             return;
@@ -212,18 +272,21 @@ impl SidebarState {
         self.connections[connection_index].status = LoadState::Loading;
         let weak = cx.entity().downgrade();
         let profile = self.connections[connection_index].profile.clone();
+        let generation = self.connections[connection_index].generation;
         cx.spawn(async move |_, cx| {
             let result = load_namespaces(profile.clone()).await;
             let _ = weak.update(cx, |state, cx| {
-                let Some(connection) = state
+                let Some(connection_index) = state
                     .connections
                     .iter_mut()
-                    .find(|connection| connection.profile.id == profile.id)
+                    .position(|connection| {
+                        connection.profile.id == profile.id && connection.generation == generation
+                    })
                 else {
                     return;
                 };
 
-                connection.status = match result {
+                state.connections[connection_index].status = match result {
                     Ok(namespaces) => LoadState::Loaded(
                         namespaces
                             .into_iter()
@@ -233,7 +296,9 @@ impl SidebarState {
                             })
                             .collect(),
                     ),
-                    Err(LoadFailure::Unsupported(message)) => LoadState::Unsupported(message),
+                    Err(LoadFailure::Unsupported(provider)) => LoadState::Unsupported(
+                        unsupported_provider_message(&provider, cx.global::<I18n>()),
+                    ),
                     Err(LoadFailure::Error(message)) => LoadState::Error(message),
                 };
                 cx.notify();
@@ -250,6 +315,7 @@ impl SidebarState {
         cx: &mut Context<Self>,
     ) {
         let profile = self.connections[connection_index].profile.clone();
+        let generation = self.connections[connection_index].generation;
         let Some(namespace) = self.namespace_mut(connection_index, namespace_index) else {
             return;
         };
@@ -264,6 +330,17 @@ impl SidebarState {
         cx.spawn(async move |_, cx| {
             let result = load_resources(profile.clone(), namespace_id.clone()).await;
             let _ = weak.update(cx, |state, cx| {
+                let Some(connection) = state
+                    .connections
+                    .iter()
+                    .find(|connection| connection.profile.id == profile.id)
+                else {
+                    return;
+                };
+                if connection.generation != generation {
+                    return;
+                }
+
                 let Some(namespace) = state.namespace_mut_by_ids(&profile.id, &namespace_id) else {
                     return;
                 };
@@ -278,7 +355,9 @@ impl SidebarState {
                             })
                             .collect(),
                     ),
-                    Err(LoadFailure::Unsupported(message)) => LoadState::Unsupported(message),
+                    Err(LoadFailure::Unsupported(provider)) => LoadState::Unsupported(
+                        unsupported_provider_message(&provider, cx.global::<I18n>()),
+                    ),
                     Err(LoadFailure::Error(message)) => LoadState::Error(message),
                 };
                 cx.notify();
@@ -296,6 +375,7 @@ impl SidebarState {
         cx: &mut Context<Self>,
     ) {
         let profile = self.connections[connection_index].profile.clone();
+        let generation = self.connections[connection_index].generation;
         let Some(namespace) = self.namespace_mut(connection_index, namespace_index) else {
             return;
         };
@@ -315,6 +395,17 @@ impl SidebarState {
         cx.spawn(async move |_, cx| {
             let result = load_resource_structure(profile.clone(), resource_ref).await;
             let _ = weak.update(cx, |state, cx| {
+                let Some(connection) = state
+                    .connections
+                    .iter()
+                    .find(|connection| connection.profile.id == profile.id)
+                else {
+                    return;
+                };
+                if connection.generation != generation {
+                    return;
+                }
+
                 let Some(resource) = state.resource_mut_by_ids(&profile.id, &namespace_id, &resource_name)
                 else {
                     return;
@@ -322,7 +413,9 @@ impl SidebarState {
 
                 resource.structure = match result {
                     Ok(structure) => LoadState::Loaded(structure),
-                    Err(LoadFailure::Unsupported(message)) => LoadState::Unsupported(message),
+                    Err(LoadFailure::Unsupported(provider)) => LoadState::Unsupported(
+                        unsupported_provider_message(&provider, cx.global::<I18n>()),
+                    ),
                     Err(LoadFailure::Error(message)) => LoadState::Error(message),
                 };
                 cx.notify();
@@ -330,6 +423,11 @@ impl SidebarState {
         })
         .detach();
         cx.notify();
+    }
+
+    fn reset_connection(&mut self, connection_index: usize) {
+        self.connections[connection_index].generation += 1;
+        self.connections[connection_index].status = LoadState::Unloaded;
     }
 
     fn namespace_mut(
@@ -524,7 +622,7 @@ fn build_resource_child_bucket_nodes(
                 .enumerate()
                 .map(|(index, item)| SidebarNode {
                     id: index_node_id(connection_id, namespace_id, resource_name, index),
-                    label: index_label(item).into(),
+                    label: index_label(item, i18n).into(),
                     kind: SidebarNodeKind::Index,
                     icon: SidebarIcon::Lucide(IconName::ListTree),
                     parent_id: Some(bucket_id.clone()),
@@ -648,12 +746,21 @@ fn key_label(key: &ResourceKeyInfo, index: usize, i18n: &I18n) -> String {
     format!("{name} ({})", key.columns.join(", "))
 }
 
-fn index_label(index: &ResourceIndexInfo) -> String {
+fn index_label(index: &ResourceIndexInfo, i18n: &I18n) -> String {
     let mut label = format!("{} ({})", index.name, index.columns.join(", "));
     if index.unique {
-        label.push_str(" UNIQUE");
+        label.push(' ');
+        label.push_str(&i18n.t("sidebar-index-unique"));
     }
     label
+}
+
+fn unsupported_provider_message(provider: &str, i18n: &I18n) -> String {
+    i18n.t_with_args("sidebar-provider-unsupported", &{
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("provider", provider);
+        args
+    })
 }
 
 fn connection_node_id(connection_id: &str) -> String {
@@ -796,9 +903,9 @@ async fn connect_profile(
             .await
             .map(|connection| Box::new(connection) as Box<dyn Connection>)
             .map_err(|error| LoadFailure::Error(error.to_string())),
-        ResolvedProviderConfig::Unknown { provider, .. } => Err(LoadFailure::Unsupported(
-            format!("provider `{provider}` is not supported in the sidebar yet"),
-        )),
+        ResolvedProviderConfig::Unknown { provider, .. } => {
+            Err(LoadFailure::Unsupported(provider.clone()))
+        }
     }
 }
 
@@ -807,6 +914,26 @@ fn resource_mut(namespace: &mut NamespaceEntry, resource_index: usize) -> Option
         LoadState::Loaded(resources) => resources.get_mut(resource_index),
         _ => None,
     }
+}
+
+fn connection_is_loading(connection: &ConnectionEntry) -> bool {
+    match &connection.status {
+        LoadState::Loading => true,
+        LoadState::Loaded(namespaces) => namespaces.iter().any(namespace_is_loading),
+        LoadState::Unloaded | LoadState::Error(_) | LoadState::Unsupported(_) => false,
+    }
+}
+
+fn namespace_is_loading(namespace: &NamespaceEntry) -> bool {
+    match &namespace.resources {
+        LoadState::Loading => true,
+        LoadState::Loaded(resources) => resources.iter().any(resource_is_loading),
+        LoadState::Unloaded | LoadState::Error(_) | LoadState::Unsupported(_) => false,
+    }
+}
+
+fn resource_is_loading(resource: &ResourceEntry) -> bool {
+    matches!(resource.structure, LoadState::Loading)
 }
 
 #[cfg(test)]
@@ -831,6 +958,7 @@ mod tests {
                         create_if_missing: true,
                     }),
                 },
+                generation: 0,
                 status: LoadState::Loaded(vec![NamespaceEntry {
                     info: NamespaceInfo {
                         id: "main".into(),
@@ -930,6 +1058,7 @@ mod tests {
 
         let state = SidebarState::from_config(&config);
         assert_eq!(state.connections.len(), 1);
+        assert_eq!(state.connections[0].generation, 0);
         assert!(matches!(state.connections[0].status, LoadState::Unloaded));
     }
 }

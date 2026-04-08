@@ -90,7 +90,13 @@ fn locale_from_candidates(
     language: Option<&str>,
     lang: Option<&str>,
 ) -> Locale {
-    let locale = [lc_all, lc_messages, language, lang, sys_locale]
+    let locale = [
+        lc_messages,
+        language,
+        sys_locale,
+        lang,
+        lc_all.filter(|value| !is_neutral_locale(value)),
+    ]
         .into_iter()
         .flatten()
         .find_map(normalize_locale);
@@ -99,6 +105,12 @@ fn locale_from_candidates(
         Some(_) => Locale::ZhCn,
         None => Locale::EnUs,
     }
+}
+
+fn is_neutral_locale(value: &str) -> bool {
+    value
+        .split(':')
+        .all(|candidate| matches!(candidate.trim(), "C" | "POSIX" | "C.UTF-8"))
 }
 
 fn read_env_locale(name: &str) -> Option<String> {
@@ -196,14 +208,42 @@ mod tests {
     }
 
     #[test]
-    fn env_overrides_take_precedence_over_system_locale() {
+    fn explicit_message_locale_overrides_system_locale() {
         assert_eq!(
             locale_from_candidates(
                 Some("en_US.UTF-8"),
+                None,
+                Some("zh_CN.UTF-8"),
+                None,
+                None
+            ),
+            Locale::ZhCn
+        );
+    }
+
+    #[test]
+    fn system_locale_overrides_lang_fallback() {
+        assert_eq!(
+            locale_from_candidates(
                 Some("zh_CN.UTF-8"),
                 None,
                 None,
-                None
+                None,
+                Some("en_US.UTF-8")
+            ),
+            Locale::ZhCn
+        );
+    }
+
+    #[test]
+    fn neutral_lc_all_does_not_override_other_candidates() {
+        assert_eq!(
+            locale_from_candidates(
+                Some("zh_CN.UTF-8"),
+                Some("C.UTF-8"),
+                None,
+                None,
+                Some("en_US.UTF-8")
             ),
             Locale::ZhCn
         );

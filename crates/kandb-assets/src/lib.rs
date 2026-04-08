@@ -51,10 +51,13 @@ define_icon_assets!(
     HardDrive => "hard-drive",
     KeyRound => "key-round",
     ListTree => "list-tree",
+    Plus => "plus",
+    RefreshCw => "refresh-cw",
     Rows3 => "rows-3",
     Server => "server",
     SquareTerminal => "square-terminal",
     Table => "table",
+    Trash2 => "trash-2",
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

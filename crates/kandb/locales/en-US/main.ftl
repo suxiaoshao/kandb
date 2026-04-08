@@ -11,6 +11,11 @@ menu-minimize = Minimize
 menu-zoom = Zoom
 
 home-sidebar-title = Connections
+home-sidebar-refresh-all = Refresh all connections
+home-sidebar-refresh-connection = Refresh selected connection
+home-sidebar-delete-connection = Delete selected connection (coming soon)
+home-sidebar-delete-select-connection = Select a connection first (delete coming soon)
+home-sidebar-add-connection = Add connection (coming soon)
 home-empty-title = Home
 home-empty-subtitle = No connection selected.
 home-placeholder-message = Home currently renders a synthetic tree from configured connections. Real SQLite metadata will replace these placeholder groups next.
@@ -32,9 +37,12 @@ sidebar-group-keys = Keys
 sidebar-group-indexes = Indexes
 sidebar-loading = Loading…
 sidebar-load-error = Metadata load failed
+sidebar-provider-unsupported = Provider `{$provider}` is not supported in the sidebar yet
+sidebar-index-unique = UNIQUE
 sidebar-key-generated-name = key #{$index}
 sidebar-key-unnamed = <unnamed>
 
+about-description = A lightweight database viewer and manager built with GPUI.
 about-window-title = About {$app_name}
 about-bootstrap-note = Currently in bootstrap and early-stage development.
 about-roadmap-note = Roadmap: connections, browsing, and editing.

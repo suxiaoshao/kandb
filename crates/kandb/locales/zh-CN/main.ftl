@@ -11,6 +11,11 @@ menu-minimize = 最小化
 menu-zoom = 缩放
 
 home-sidebar-title = 连接
+home-sidebar-refresh-all = 刷新全部连接
+home-sidebar-refresh-connection = 刷新当前连接
+home-sidebar-delete-connection = 删除当前连接（即将支持）
+home-sidebar-delete-select-connection = 请先选择一个连接（删除功能即将支持）
+home-sidebar-add-connection = 添加连接（即将支持）
 home-empty-title = 主页
 home-empty-subtitle = 尚未选择连接。
 home-placeholder-message = 当前主页渲染的是根据已配置连接生成的合成树。接下来这些占位分组会被真实的 SQLite 元数据替换。
@@ -32,9 +37,12 @@ sidebar-group-keys = 键
 sidebar-group-indexes = 索引
 sidebar-loading = 加载中…
 sidebar-load-error = 元数据加载失败
-sidebar-key-generated-name = key #{$index}
-sidebar-key-unnamed = <unnamed>
+sidebar-provider-unsupported = 侧边栏暂不支持 `{$provider}` provider
+sidebar-index-unique = 唯一
+sidebar-key-generated-name = 键 #{$index}
+sidebar-key-unnamed = <未命名>
 
+about-description = 一个使用 GPUI 构建的轻量级数据库查看与管理工具。
 about-window-title = 关于 {$app_name}
 about-bootstrap-note = 当前仍处于 bootstrap 和早期开发阶段。
 about-roadmap-note = 路线图：连接、浏览与编辑。

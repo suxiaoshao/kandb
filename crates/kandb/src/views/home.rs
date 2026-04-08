@@ -14,7 +14,8 @@ use crate::{
 };
 use gpui::{InteractiveElement as _, prelude::FluentBuilder as _, *};
 use gpui_component::{
-    ActiveTheme, Icon, Root, Sizable, Size, h_flex,
+    ActiveTheme, Disableable, Icon, Root, Sizable, Size, h_flex,
+    button::{Button, ButtonVariants},
     label::Label,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -79,6 +80,9 @@ impl HomeView {
     }
 
     fn reconcile_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_state
+            .update(cx, |state, cx| state.preload_all_connections(cx));
+
         let tree = self.sidebar_state.read(cx).build_tree(cx.global::<I18n>());
         let valid_node_ids = tree.valid_node_ids();
         let default_expanded_node_ids = tree.default_expanded_node_ids();
@@ -229,9 +233,35 @@ impl HomeView {
         let selected_node_id = workspace.selected_node_id().map(ToOwned::to_owned);
         let expanded_node_ids = workspace.expanded_node_ids().clone();
         let visible_nodes = tree.visible_nodes(&expanded_node_ids);
+        let selected_connection_node_id = selected_node_id
+            .as_deref()
+            .and_then(|node_id| tree.connection_node_id_for(node_id))
+            .map(ToOwned::to_owned);
+        let delete_enabled = selected_node_id
+            .as_deref()
+            .is_some_and(|node_id| tree.is_connection_node(node_id));
+        let refresh_loading = selected_connection_node_id
+            .as_deref()
+            .map(|connection_id| {
+                self.sidebar_state
+                    .read(cx)
+                    .is_connection_refreshing(connection_id)
+            })
+            .unwrap_or_else(|| self.sidebar_state.read(cx).is_any_refreshing());
         let sidebar_is_focused = self.sidebar_focus_handle.is_focused(window);
         let sidebar_focus_handle = self.sidebar_focus_handle.clone();
         let sidebar_state = self.sidebar_state.clone();
+        let i18n = cx.global::<I18n>();
+        let refresh_tooltip = selected_connection_node_id
+            .as_ref()
+            .map(|_| i18n.t("home-sidebar-refresh-connection"))
+            .unwrap_or_else(|| i18n.t("home-sidebar-refresh-all"));
+        let delete_tooltip = if delete_enabled {
+            i18n.t("home-sidebar-delete-connection")
+        } else {
+            i18n.t("home-sidebar-delete-select-connection")
+        };
+        let add_tooltip = i18n.t("home-sidebar-add-connection");
 
         div()
             .key_context(SIDEBAR_CONTEXT)
@@ -250,12 +280,48 @@ impl HomeView {
                 div()
                     .px_3()
                     .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
-                        Label::new(cx.global::<I18n>().t("home-sidebar-title"))
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD),
+                        Button::new("home-sidebar-refresh")
+                            .ghost()
+                            .small()
+                            .icon(IconName::RefreshCw)
+                            .tooltip(refresh_tooltip)
+                            .loading(refresh_loading)
+                            .on_click({
+                                let sidebar_state = sidebar_state.clone();
+                                let target = selected_connection_node_id.clone();
+                                move |_, _, cx| {
+                                    sidebar_state.update(cx, |state, cx| {
+                                        if let Some(connection_node_id) = target.as_deref() {
+                                            state.refresh_connection(connection_node_id, cx);
+                                        } else {
+                                            state.refresh_all_connections(cx);
+                                        }
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("home-sidebar-delete")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Trash2)
+                            .tooltip(delete_tooltip)
+                            .disabled(!delete_enabled)
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(
+                        Button::new("home-sidebar-add")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Plus)
+                            .tooltip(add_tooltip)
+                            .on_click(|_, _, _| {}),
                     ),
             )
             .child(
@@ -490,14 +556,10 @@ fn render_sidebar_row(
             this.child(
                 div()
                     .flex_none()
-                    .min_w(px(22.0))
-                    .px_1p5()
-                    .py_0p5()
-                    .rounded(px(999.0))
-                    .bg(cx.theme().secondary)
+                    .min_w(px(14.0))
                     .child(
                         Label::new(count.to_string())
-                            .text_xs()
+                            .text_sm()
                             .text_color(cx.theme().muted_foreground),
                     ),
             )
@@ -606,4 +668,70 @@ fn detail_row(label: String, value: SharedString, cx: &App) -> impl IntoElement 
                 .text_sm()
                 .text_color(cx.theme().foreground),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SidebarIcon, SidebarTree};
+    use crate::views::home::sidebar_model::{SidebarNode, SidebarNodeKind};
+    use kandb_assets::{IconName, ProviderIconName};
+
+    fn sample_tree() -> SidebarTree {
+        SidebarTree::new(vec![SidebarNode {
+            id: "connection:local".into(),
+            label: "Local".into(),
+            kind: SidebarNodeKind::Connection,
+            icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+            parent_id: None,
+            trailing_label: None,
+            badge_count: None,
+            children: vec![SidebarNode {
+                id: "namespace:local:main".into(),
+                label: "main".into(),
+                kind: SidebarNodeKind::Namespace,
+                icon: SidebarIcon::Lucide(IconName::HardDrive),
+                parent_id: Some("connection:local".into()),
+                trailing_label: None,
+                badge_count: None,
+                children: vec![SidebarNode {
+                    id: "resource:local:main:users".into(),
+                    label: "users".into(),
+                    kind: SidebarNodeKind::Resource,
+                    icon: SidebarIcon::Lucide(IconName::Table),
+                    parent_id: Some("bucket:local:main:tables".into()),
+                    trailing_label: None,
+                    badge_count: None,
+                    children: Vec::new(),
+                }],
+            }],
+        }])
+    }
+
+    #[::core::prelude::v1::test]
+    fn refresh_target_uses_selected_connection() {
+        let tree = sample_tree();
+
+        assert_eq!(
+            tree.connection_node_id_for("connection:local"),
+            Some("connection:local")
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn refresh_target_resolves_nested_node_to_connection() {
+        let tree = sample_tree();
+
+        assert_eq!(
+            tree.connection_node_id_for("resource:local:main:users"),
+            Some("connection:local")
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn delete_only_enables_for_connection_node() {
+        let tree = sample_tree();
+
+        assert!(tree.is_connection_node("connection:local"));
+        assert!(!tree.is_connection_node("resource:local:main:users"));
+    }
 }
