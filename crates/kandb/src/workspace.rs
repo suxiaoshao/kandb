@@ -1,7 +1,7 @@
 use crate::{
     app_paths::AppPaths,
     errors::{KandbError, KandbResult},
-    views::home::sidebar_model::{migrate_legacy_node_id, persisted_connection_node_id},
+    views::home::sidebar_model::persisted_connection_node_id,
 };
 use gpui::{
     App, Bounds, Context, Entity, Global, Pixels, Task, Timer, WindowBounds, point, px, size,
@@ -192,27 +192,6 @@ impl WorkspaceState {
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
-
-        let migrated_selected = self
-            .persisted
-            .selected_node_id
-            .as_deref()
-            .and_then(migrate_legacy_node_id);
-        if migrated_selected.is_some() {
-            self.persisted.selected_node_id = migrated_selected;
-            changed = true;
-        }
-
-        let migrated_expanded = self
-            .persisted
-            .expanded_node_ids
-            .iter()
-            .map(|node_id| migrate_legacy_node_id(node_id).unwrap_or_else(|| node_id.clone()))
-            .collect::<BTreeSet<_>>();
-        if migrated_expanded != self.persisted.expanded_node_ids {
-            self.persisted.expanded_node_ids = migrated_expanded;
-            changed = true;
-        }
 
         if self.persisted.expanded_node_ids.is_empty() && !default_expanded_node_ids.is_empty() {
             self.persisted.expanded_node_ids = default_expanded_node_ids.clone();

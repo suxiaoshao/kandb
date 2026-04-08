@@ -230,74 +230,6 @@ pub(crate) fn decode_node_id(node_id: &str) -> Option<SidebarNodeId> {
     serde_json::from_slice(&bytes).ok()
 }
 
-pub(crate) fn migrate_legacy_node_id(node_id: &str) -> Option<String> {
-    let migrated = if let Some(connection_id) = node_id.strip_prefix("connection:") {
-        SidebarNodeId::Connection {
-            connection_id: connection_id.to_string(),
-        }
-    } else if let Some(rest) = node_id.strip_prefix("namespace:") {
-        let mut parts = rest.split(':');
-        let migrated = SidebarNodeId::Namespace {
-            connection_id: parts.next()?.to_string(),
-            namespace_id: parts.next()?.to_string(),
-        };
-        if parts.next().is_some() {
-            return None;
-        }
-        migrated
-    } else if let Some(rest) = node_id.strip_prefix("bucket:") {
-        let mut parts = rest.split(':');
-        let migrated = SidebarNodeId::ResourceBucket {
-            connection_id: parts.next()?.to_string(),
-            namespace_id: parts.next()?.to_string(),
-            bucket: parse_bucket_slug(parts.next()?)?,
-        };
-        if parts.next().is_some() {
-            return None;
-        }
-        migrated
-    } else if let Some(rest) = node_id.strip_prefix("child-bucket:") {
-        let mut parts = rest.split(':');
-        let migrated = SidebarNodeId::ResourceChildBucket {
-            connection_id: parts.next()?.to_string(),
-            namespace_id: parts.next()?.to_string(),
-            resource_name: parts.next()?.to_string(),
-            bucket: parse_bucket_slug(parts.next()?)?,
-        };
-        if parts.next().is_some() {
-            return None;
-        }
-        migrated
-    } else if let Some(rest) = node_id.strip_prefix("resource:") {
-        let mut parts = rest.split(':');
-        let migrated = SidebarNodeId::Resource {
-            connection_id: parts.next()?.to_string(),
-            namespace_id: parts.next()?.to_string(),
-            resource_name: parts.next()?.to_string(),
-        };
-        if parts.next().is_some() {
-            return None;
-        }
-        migrated
-    } else if let Some(rest) = node_id.strip_prefix("field:") {
-        let mut parts = rest.split(':');
-        let migrated = SidebarNodeId::Field {
-            connection_id: parts.next()?.to_string(),
-            namespace_id: parts.next()?.to_string(),
-            resource_name: parts.next()?.to_string(),
-            field_name: parts.next()?.to_string(),
-        };
-        if parts.next().is_some() {
-            return None;
-        }
-        migrated
-    } else {
-        return None;
-    };
-
-    Some(encode_node_id(&migrated))
-}
-
 pub(crate) fn persisted_connection_node_id(node_id: &str) -> Option<String> {
     match decode_node_id(node_id) {
         Some(SidebarNodeId::Connection { connection_id })
@@ -308,13 +240,7 @@ pub(crate) fn persisted_connection_node_id(node_id: &str) -> Option<String> {
         | Some(SidebarNodeId::Field { connection_id, .. })
         | Some(SidebarNodeId::Key { connection_id, .. })
         | Some(SidebarNodeId::Index { connection_id, .. }) => Some(connection_node_id(&connection_id)),
-        None => {
-            if let Some(node_id) = migrate_legacy_node_id(node_id) {
-                persisted_connection_node_id(&node_id)
-            } else {
-                None
-            }
-        }
+        None => None,
     }
 }
 
@@ -495,17 +421,6 @@ fn find_connection_node_id<'a>(node: &'a SidebarNode, target_id: &str) -> Option
     None
 }
 
-fn parse_bucket_slug(slug: &str) -> Option<SidebarBucketKind> {
-    match slug {
-        "tables" => Some(SidebarBucketKind::Tables),
-        "views" => Some(SidebarBucketKind::Views),
-        "columns" => Some(SidebarBucketKind::Columns),
-        "keys" => Some(SidebarBucketKind::Keys),
-        "indexes" => Some(SidebarBucketKind::Indexes),
-        _ => None,
-    }
-}
-
 fn hex_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -565,21 +480,4 @@ mod tests {
         assert_eq!(decode_node_id(&encoded), Some(node_id));
     }
 
-    #[test]
-    fn legacy_ids_migrate_when_components_are_unambiguous() {
-        let migrated = migrate_legacy_node_id("resource:local:main:users").unwrap();
-        assert_eq!(
-            decode_node_id(&migrated),
-            Some(SidebarNodeId::Resource {
-                connection_id: "local".into(),
-                namespace_id: "main".into(),
-                resource_name: "users".into(),
-            })
-        );
-    }
-
-    #[test]
-    fn legacy_ids_with_ambiguous_components_do_not_migrate() {
-        assert!(migrate_legacy_node_id("resource:local:main:users:loading").is_none());
-    }
 }

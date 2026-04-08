@@ -2,9 +2,7 @@ pub(crate) mod sidebar_model;
 mod sidebar_state;
 
 use self::{
-    sidebar_model::{
-        SidebarIcon, SidebarNodeKind, SidebarTree, VisibleSidebarNode, persisted_connection_node_id,
-    },
+    sidebar_model::{SidebarIcon, SidebarNodeKind, SidebarTree, VisibleSidebarNode},
     sidebar_state::SidebarState,
 };
 use crate::{
@@ -266,11 +264,7 @@ impl HomeView {
         let visible_nodes = tree.visible_nodes(&expanded_node_ids);
         let selected_connection_node_id = selected_node_id
             .as_deref()
-            .and_then(|node_id| {
-                tree.connection_node_id_for(node_id)
-                    .map(ToOwned::to_owned)
-                    .or_else(|| persisted_connection_node_id(node_id))
-            });
+            .and_then(|node_id| tree.connection_node_id_for(node_id).map(ToOwned::to_owned));
         let delete_enabled = selected_node_id
             .as_deref()
             .is_some_and(|node_id| tree.is_connection_node(node_id));
