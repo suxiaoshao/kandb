@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn sqlite_schema_stays_in_tables_bucket() {
         let tree = sample_state().build_tree(&I18n::english_for_test());
-        let visible = tree.visible_nodes(&tree.default_expanded_node_ids());
+        let visible = tree.visible_nodes(&tree.default_expanded_node_ids(None));
 
         assert!(visible.iter().any(|node| node.id == "resource:local-main:main:sqlite_schema"));
         assert!(!visible.iter().any(|node| node.label == "System"));
@@ -1022,7 +1022,7 @@ mod tests {
         let tree = sample_state().build_tree(&I18n::english_for_test());
 
         assert_eq!(
-            tree.default_expanded_node_ids(),
+            tree.default_expanded_node_ids(None),
             BTreeSet::from([
                 "connection:local-main".to_string(),
                 "namespace:local-main:main".to_string(),

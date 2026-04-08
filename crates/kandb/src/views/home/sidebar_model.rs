@@ -75,13 +75,20 @@ impl SidebarTree {
         ids
     }
 
-    pub(crate) fn default_selected_node_id(&self) -> Option<&str> {
-        self.roots.first().map(|node| node.id.as_str())
+    pub(crate) fn default_selected_node_id(
+        &self,
+        preferred_connection_id: Option<&str>,
+    ) -> Option<&str> {
+        self.preferred_root(preferred_connection_id)
+            .map(|node| node.id.as_str())
     }
 
-    pub(crate) fn default_expanded_node_ids(&self) -> BTreeSet<String> {
+    pub(crate) fn default_expanded_node_ids(
+        &self,
+        preferred_connection_id: Option<&str>,
+    ) -> BTreeSet<String> {
         let mut expanded = BTreeSet::new();
-        if let Some(root) = self.roots.first() {
+        if let Some(root) = self.preferred_root(preferred_connection_id) {
             expanded.insert(root.id.clone());
             if let Some(first_namespace) = root.children.first() {
                 expanded.insert(first_namespace.id.clone());
@@ -136,6 +143,15 @@ impl SidebarTree {
 
     fn find_node(&self, node_id: &str) -> Option<&SidebarNode> {
         self.roots.iter().find_map(|root| find_node(root, node_id))
+    }
+
+    fn preferred_root(&self, preferred_connection_id: Option<&str>) -> Option<&SidebarNode> {
+        preferred_connection_id
+            .and_then(|connection_id| {
+                let node_id = format!("connection:{connection_id}");
+                self.roots.iter().find(|root| root.id == node_id)
+            })
+            .or_else(|| self.roots.first())
     }
 }
 

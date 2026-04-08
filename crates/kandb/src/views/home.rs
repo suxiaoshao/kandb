@@ -84,9 +84,16 @@ impl HomeView {
             .update(cx, |state, cx| state.preload_all_connections(cx));
 
         let tree = self.sidebar_state.read(cx).build_tree(cx.global::<I18n>());
+        let preferred_connection_id = cx
+            .global::<LoadedAppConfig>()
+            .file
+            .default_connection_id
+            .as_deref();
         let valid_node_ids = tree.valid_node_ids();
-        let default_expanded_node_ids = tree.default_expanded_node_ids();
-        let default_selected_node_id = tree.default_selected_node_id().map(ToOwned::to_owned);
+        let default_expanded_node_ids = tree.default_expanded_node_ids(preferred_connection_id);
+        let default_selected_node_id = tree
+            .default_selected_node_id(preferred_connection_id)
+            .map(ToOwned::to_owned);
 
         let expanded = cx
             .global::<WorkspaceStore>()
@@ -733,5 +740,36 @@ mod tests {
 
         assert!(tree.is_connection_node("connection:local"));
         assert!(!tree.is_connection_node("resource:local:main:users"));
+    }
+
+    #[::core::prelude::v1::test]
+    fn default_selection_prefers_configured_connection() {
+        let tree = SidebarTree::new(vec![
+            SidebarNode {
+                id: "connection:first".into(),
+                label: "First".into(),
+                kind: SidebarNodeKind::Connection,
+                icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+                parent_id: None,
+                trailing_label: None,
+                badge_count: None,
+                children: Vec::new(),
+            },
+            SidebarNode {
+                id: "connection:preferred".into(),
+                label: "Preferred".into(),
+                kind: SidebarNodeKind::Connection,
+                icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+                parent_id: None,
+                trailing_label: None,
+                badge_count: None,
+                children: Vec::new(),
+            },
+        ]);
+
+        assert_eq!(
+            tree.default_selected_node_id(Some("preferred")),
+            Some("connection:preferred")
+        );
     }
 }

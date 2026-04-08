@@ -269,24 +269,30 @@ impl ResourceStructureIntrospector for SqliteConnectionHandle {
             .await
             .map_err(|err| ProviderError::new(ProviderErrorKind::Metadata, err.to_string()))?;
 
-        Ok(Some(
-            indexes
-                .into_iter()
-                .filter_map(|index| match index.origin.as_str() {
-                    "pk" => Some(ResourceKeyInfo {
-                        name: normalize_key_name(index.name.as_deref()),
-                        kind: ResourceKeyKind::Primary,
-                        columns: index.columns,
-                    }),
-                    "u" => Some(ResourceKeyInfo {
-                        name: normalize_key_name(index.name.as_deref()),
-                        kind: ResourceKeyKind::Unique,
-                        columns: index.columns,
-                    }),
-                    _ => None,
-                })
-                .collect(),
-        ))
+        let mut keys = indexes
+            .into_iter()
+            .filter_map(|index| match index.origin.as_str() {
+                "pk" => Some(ResourceKeyInfo {
+                    name: normalize_key_name(index.name.as_deref()),
+                    kind: ResourceKeyKind::Primary,
+                    columns: index.columns,
+                }),
+                "u" => Some(ResourceKeyInfo {
+                    name: normalize_key_name(index.name.as_deref()),
+                    kind: ResourceKeyKind::Unique,
+                    columns: index.columns,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        if !keys.iter().any(|key| key.kind == ResourceKeyKind::Primary)
+            && let Some(primary_key) = self.load_primary_key_from_fields(resource).await?
+        {
+            keys.insert(0, primary_key);
+        }
+
+        Ok(Some(keys))
     }
 
     async fn list_indexes(
@@ -327,6 +333,39 @@ impl SqliteConnectionHandle {
 
     pub fn config(&self) -> &SqliteConfig {
         &self.config
+    }
+
+    async fn load_primary_key_from_fields(
+        &self,
+        resource: &ResourceRef,
+    ) -> Result<Option<ResourceKeyInfo>> {
+        let Some(fields) = self.list_fields(resource).await? else {
+            return Ok(None);
+        };
+
+        let mut primary_columns = fields
+            .into_iter()
+            .filter_map(|field| {
+                field
+                    .primary_key_ordinal
+                    .map(|ordinal| (ordinal, field.name))
+            })
+            .collect::<Vec<_>>();
+
+        if primary_columns.is_empty() {
+            return Ok(None);
+        }
+
+        primary_columns.sort_by_key(|(ordinal, _)| *ordinal);
+
+        Ok(Some(ResourceKeyInfo {
+            name: None,
+            kind: ResourceKeyKind::Primary,
+            columns: primary_columns
+                .into_iter()
+                .map(|(_, name)| name)
+                .collect(),
+        }))
     }
 
     async fn load_resource_indexes(
@@ -867,6 +906,11 @@ mod tests {
             let tag_keys = connection.list_keys(&tag_resource).await.unwrap().unwrap();
             let tag_indexes = connection.list_indexes(&tag_resource).await.unwrap().unwrap();
 
+            assert!(
+                tag_keys.iter().any(|key| key.name.is_none()
+                    && key.kind == ResourceKeyKind::Primary
+                    && key.columns == vec!["id".to_string()])
+            );
             assert!(
                 tag_keys.iter().any(|key| key.name.is_none()
                     && key.kind == ResourceKeyKind::Unique
