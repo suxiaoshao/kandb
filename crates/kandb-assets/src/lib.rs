@@ -43,14 +43,21 @@ macro_rules! define_icon_assets {
 define_icon_assets!(
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
+    Columns3 => "columns-3",
     Database => "database",
     FolderClosed => "folder-closed",
     FolderOpen => "folder-open",
+    Hash => "hash",
     HardDrive => "hard-drive",
+    KeyRound => "key-round",
+    ListTree => "list-tree",
+    Plus => "plus",
+    RefreshCw => "refresh-cw",
     Rows3 => "rows-3",
     Server => "server",
     SquareTerminal => "square-terminal",
     Table => "table",
+    Trash2 => "trash-2",
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

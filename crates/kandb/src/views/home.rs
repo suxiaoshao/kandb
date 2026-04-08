@@ -1,6 +1,10 @@
-mod sidebar_model;
+pub(crate) mod sidebar_model;
+mod sidebar_state;
 
-use self::sidebar_model::{SidebarIcon, SidebarNodeKind, SidebarTree, VisibleSidebarNode};
+use self::{
+    sidebar_model::{SidebarIcon, SidebarNodeKind, SidebarTree, VisibleSidebarNode},
+    sidebar_state::SidebarState,
+};
 use crate::{
     app_menus,
     components::provider_icon::provider_icon,
@@ -10,7 +14,8 @@ use crate::{
 };
 use gpui::{InteractiveElement as _, prelude::FluentBuilder as _, *};
 use gpui_component::{
-    ActiveTheme, Icon, Root, Sizable, Size, h_flex,
+    ActiveTheme, Disableable, Icon, Root, Sizable, Size, h_flex,
+    button::{Button, ButtonVariants},
     label::Label,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -35,6 +40,7 @@ pub(crate) fn init(cx: &mut App) {
 pub(crate) struct HomeView {
     focus_handle: FocusHandle,
     sidebar_focus_handle: FocusHandle,
+    sidebar_state: Entity<SidebarState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -43,25 +49,20 @@ impl HomeView {
         let focus_handle = cx.focus_handle();
         let sidebar_focus_handle = cx.focus_handle();
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
-        let default_expanded_node_ids = tree.default_expanded_node_ids();
-        let default_selected_node_id = tree.default_selected_node_id().map(ToOwned::to_owned);
-        let valid_node_ids = tree.valid_node_ids();
+        let config = cx.global::<LoadedAppConfig>().clone();
+        let sidebar_state = cx.new(|_| SidebarState::from_config(&config));
 
-        workspace.update(cx, |workspace, cx| {
-            workspace.ensure_initial_sidebar_state(
-                &valid_node_ids,
-                default_selected_node_id.as_deref(),
-                &default_expanded_node_ids,
-                cx,
-            );
-        });
-
-        Self {
+        let mut this = Self {
             focus_handle,
             sidebar_focus_handle,
+            sidebar_state: sidebar_state.clone(),
             _subscriptions: vec![
-                cx.observe(&workspace, |_this, _, cx| {
+                cx.observe(&workspace, |this, _, cx| {
+                    this.reconcile_sidebar(cx);
+                    cx.notify();
+                }),
+                cx.observe(&sidebar_state, |this, _, cx| {
+                    this.reconcile_sidebar(cx);
                     cx.notify();
                 }),
                 cx.observe_window_bounds(window, |this, window, cx| {
@@ -72,7 +73,50 @@ impl HomeView {
                     async {}
                 }),
             ],
-        }
+        };
+
+        this.reconcile_sidebar(cx);
+        this
+    }
+
+    fn reconcile_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_state
+            .update(cx, |state, cx| state.preload_all_connections(cx));
+
+        let expanded = cx
+            .global::<WorkspaceStore>()
+            .read(cx)
+            .expanded_node_ids()
+            .clone();
+        self.sidebar_state
+            .update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
+
+        let tree = self.sidebar_state.read(cx).build_tree(cx.global::<I18n>());
+        let preferred_connection_id = cx
+            .global::<LoadedAppConfig>()
+            .file
+            .default_connection_id
+            .as_deref();
+        let valid_node_ids = tree.valid_node_ids();
+        let settled_connection_node_ids = self.sidebar_state.read(cx).settled_connection_node_ids();
+        let default_expanded_node_ids = tree.default_expanded_node_ids(preferred_connection_id);
+        let default_selected_node_id = tree
+            .default_selected_node_id(preferred_connection_id)
+            .map(ToOwned::to_owned);
+
+        cx.global::<WorkspaceStore>().deref().clone().update(cx, |workspace, cx| {
+            workspace.reconcile_sidebar_state(
+                &valid_node_ids,
+                &settled_connection_node_ids,
+                default_selected_node_id.as_deref(),
+                &default_expanded_node_ids,
+                cx,
+            );
+        });
+    }
+
+    fn tree(&self, cx: &App) -> SidebarTree {
+        self.sidebar_state.read(cx).build_tree(cx.global::<I18n>())
     }
 
     fn close_window(
@@ -109,7 +153,7 @@ impl HomeView {
     }
 
     fn move_left(&mut self, _: &MoveLeft, _window: &mut Window, cx: &mut Context<Self>) {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
+        let tree = self.tree(cx);
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
 
         workspace.update(cx, |workspace, cx| {
@@ -134,7 +178,7 @@ impl HomeView {
     }
 
     fn move_right(&mut self, _: &MoveRight, _window: &mut Window, cx: &mut Context<Self>) {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
+        let tree = self.tree(cx);
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
 
         workspace.update(cx, |workspace, cx| {
@@ -159,6 +203,7 @@ impl HomeView {
 
             if let Some(next_node) = visible.get(selected_index + 1)
                 && next_node.parent_id.as_deref() == Some(selected_node.id.as_str())
+                && next_node.selectable
             {
                 workspace.select_node(next_node.id.clone(), cx);
             }
@@ -166,7 +211,7 @@ impl HomeView {
     }
 
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
+        let tree = self.tree(cx);
         let workspace = cx.global::<WorkspaceStore>().deref().clone();
 
         workspace.update(cx, |workspace, cx| {
@@ -178,28 +223,73 @@ impl HomeView {
             let next_index = tree
                 .find_visible_index(workspace.expanded_node_ids(), workspace.selected_node_id())
                 .map(|index| {
-                    if delta.is_negative() {
+                    let mut candidate = if delta.is_negative() {
                         index.saturating_sub(delta.unsigned_abs())
                     } else {
                         (index + delta as usize).min(visible.len().saturating_sub(1))
+                    };
+
+                    while candidate < visible.len() && !visible[candidate].selectable {
+                        if delta.is_negative() {
+                            if candidate == 0 {
+                                break;
+                            }
+                            candidate -= 1;
+                        } else {
+                            candidate += 1;
+                            if candidate >= visible.len() {
+                                candidate = visible.len().saturating_sub(1);
+                                break;
+                            }
+                        }
                     }
+
+                    candidate
                 })
                 .unwrap_or(0);
 
-            if let Some(next_node) = visible.get(next_index) {
+            if let Some(next_node) = visible.get(next_index)
+                && next_node.selectable
+            {
                 workspace.select_node(next_node.id.clone(), cx);
             }
         });
     }
 
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), cx.global::<I18n>());
+        let tree = self.tree(cx);
         let workspace = cx.global::<WorkspaceStore>().read(cx);
         let selected_node_id = workspace.selected_node_id().map(ToOwned::to_owned);
         let expanded_node_ids = workspace.expanded_node_ids().clone();
         let visible_nodes = tree.visible_nodes(&expanded_node_ids);
+        let selected_connection_node_id = selected_node_id
+            .as_deref()
+            .and_then(|node_id| tree.connection_node_id_for(node_id).map(ToOwned::to_owned));
+        let delete_enabled = selected_node_id
+            .as_deref()
+            .is_some_and(|node_id| tree.is_connection_node(node_id));
+        let refresh_loading = selected_connection_node_id
+            .as_deref()
+            .map(|connection_id| {
+                self.sidebar_state
+                    .read(cx)
+                    .is_connection_refreshing(connection_id)
+            })
+            .unwrap_or_else(|| self.sidebar_state.read(cx).is_any_refreshing());
         let sidebar_is_focused = self.sidebar_focus_handle.is_focused(window);
         let sidebar_focus_handle = self.sidebar_focus_handle.clone();
+        let sidebar_state = self.sidebar_state.clone();
+        let i18n = cx.global::<I18n>();
+        let refresh_tooltip = selected_connection_node_id
+            .as_ref()
+            .map(|_| i18n.t("home-sidebar-refresh-connection"))
+            .unwrap_or_else(|| i18n.t("home-sidebar-refresh-all"));
+        let delete_tooltip = if delete_enabled {
+            i18n.t("home-sidebar-delete-connection")
+        } else {
+            i18n.t("home-sidebar-delete-select-connection")
+        };
+        let add_tooltip = i18n.t("home-sidebar-add-connection");
 
         div()
             .key_context(SIDEBAR_CONTEXT)
@@ -218,12 +308,48 @@ impl HomeView {
                 div()
                     .px_3()
                     .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
-                        Label::new(cx.global::<I18n>().t("home-sidebar-title"))
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD),
+                        Button::new("home-sidebar-refresh")
+                            .ghost()
+                            .small()
+                            .icon(IconName::RefreshCw)
+                            .tooltip(refresh_tooltip)
+                            .loading(refresh_loading)
+                            .on_click({
+                                let sidebar_state = sidebar_state.clone();
+                                let target = selected_connection_node_id.clone();
+                                move |_, _, cx| {
+                                    sidebar_state.update(cx, |state, cx| {
+                                        if let Some(connection_node_id) = target.as_deref() {
+                                            state.refresh_connection(connection_node_id, cx);
+                                        } else {
+                                            state.refresh_all_connections(cx);
+                                        }
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("home-sidebar-delete")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Trash2)
+                            .tooltip(delete_tooltip)
+                            .disabled(!delete_enabled)
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(
+                        Button::new("home-sidebar-add")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Plus)
+                            .tooltip(add_tooltip)
+                            .on_click(|_, _, _| {}),
                     ),
             )
             .child(
@@ -238,6 +364,7 @@ impl HomeView {
                             selected_node_id.as_deref(),
                             sidebar_is_focused,
                             sidebar_focus_handle.clone(),
+                            sidebar_state.clone(),
                             cx,
                         )
                     })),
@@ -246,7 +373,7 @@ impl HomeView {
 
     fn render_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let i18n = cx.global::<I18n>();
-        let tree = SidebarTree::from_config(cx.global::<LoadedAppConfig>(), i18n);
+        let tree = self.tree(cx);
         let workspace = cx.global::<WorkspaceStore>().read(cx);
         let selected_node = workspace
             .selected_node_id()
@@ -271,7 +398,7 @@ impl HomeView {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(520.0))
+                    .max_w(px(560.0))
                     .flex()
                     .flex_col()
                     .gap_4()
@@ -300,10 +427,37 @@ impl HomeView {
                                     ),
                             ),
                     )
-                    .child(
-                        Label::new(i18n.t("home-placeholder-message"))
-                            .text_color(cx.theme().muted_foreground),
-                    ),
+                    .when_some(selected_node.clone(), |this, node| {
+                        this.child(
+                            v_flex()
+                                .gap_2()
+                                .child(detail_row(
+                                    i18n.t("home-detail-node-id"),
+                                    node.id.clone().into(),
+                                    cx,
+                                ))
+                                .when_some(node.trailing_label.clone(), |this, trailing| {
+                                    this.child(detail_row(
+                                        i18n.t("home-detail-type"),
+                                        trailing,
+                                        cx,
+                                    ))
+                                })
+                                .when_some(node.badge_count, |this, count| {
+                                    this.child(detail_row(
+                                        i18n.t("home-detail-count"),
+                                        count.to_string().into(),
+                                        cx,
+                                    ))
+                                }),
+                        )
+                    })
+                    .when(selected_node.is_none(), |this| {
+                        this.child(
+                            Label::new(i18n.t("home-placeholder-message"))
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                    }),
             )
     }
 }
@@ -357,23 +511,20 @@ fn render_sidebar_row(
     selected_node_id: Option<&str>,
     sidebar_is_focused: bool,
     sidebar_focus_handle: FocusHandle,
+    sidebar_state: Entity<SidebarState>,
     cx: &App,
 ) -> AnyElement {
-    if matches!(node.icon, SidebarIcon::Provider(ProviderIconName::Sqlite)) {
-        return provider_row(
-            node,
-            selected_node_id,
-            sidebar_is_focused,
-            sidebar_focus_handle,
-            cx,
-        );
-    }
-
     let is_selected = selected_node_id == Some(node.id.as_str());
     let padding_left = px(10.0 + (node.depth as f32) * 16.0);
-    let icon = match node.icon {
-        SidebarIcon::Lucide(icon) => icon,
-        SidebarIcon::Provider(_) => unreachable!("provider icons are handled above"),
+    let icon = match node.kind {
+        SidebarNodeKind::ResourceBucket | SidebarNodeKind::ResourceChildBucket => {
+            if node.expanded {
+                SidebarIcon::Lucide(IconName::FolderOpen)
+            } else {
+                SidebarIcon::Lucide(IconName::FolderClosed)
+            }
+        }
+        _ => node.icon,
     };
 
     h_flex()
@@ -404,86 +555,67 @@ fn render_sidebar_row(
         .when(!is_selected, |this| {
             this.hover(|style| style.bg(gpui::hsla(214.0 / 360.0, 0.18, 0.48, 0.08)))
         })
-        .child(render_disclosure(&node))
+        .child(div().flex_none().child(render_disclosure(&node)))
+        .child(div().flex_none().child(render_icon(icon, &node, cx)))
         .child(
-            Icon::new(icon)
-                .with_size(Size::Small)
-                .text_color(cx.theme().muted_foreground),
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .truncate()
+                .child(
+                    Label::new(node.label.clone())
+                        .text_sm()
+                        .text_color(cx.theme().foreground),
+                ),
         )
-        .child(
-            Label::new(node.label.clone())
-                .text_sm()
-                .text_color(cx.theme().foreground),
-        )
-        .cursor_pointer()
-        .on_click(move |_, window, cx| {
-            window.focus(&sidebar_focus_handle);
-            cx.global::<WorkspaceStore>()
-                .deref()
-                .clone()
-                .update(cx, |workspace, cx| {
-                    workspace.select_node(node.id.clone(), cx)
-                });
+        .when_some(node.trailing_label.clone(), |this, trailing| {
+            this.child(
+                div()
+                    .flex_none()
+                    .truncate()
+                    .child(
+                        Label::new(trailing)
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground),
+                    ),
+            )
+        })
+        .when_some(node.badge_count, |this, count| {
+            this.child(
+                div()
+                    .flex_none()
+                    .min_w(px(14.0))
+                    .child(
+                        Label::new(count.to_string())
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground),
+                    ),
+            )
+        })
+        .when(node.selectable, |this| {
+            this.cursor_pointer().on_click(move |_, window, cx| {
+                window.focus(&sidebar_focus_handle);
+                let workspace = cx.global::<WorkspaceStore>().deref().clone();
+                workspace.update(cx, |workspace, cx| workspace.select_node(node.id.clone(), cx));
+                let expanded = workspace.read(cx).expanded_node_ids().clone();
+                sidebar_state.update(cx, |state, cx| state.ensure_expanded_loaded(&expanded, cx));
+            })
         })
         .into_any_element()
 }
 
-fn provider_row(
-    node: VisibleSidebarNode,
-    selected_node_id: Option<&str>,
-    sidebar_is_focused: bool,
-    sidebar_focus_handle: FocusHandle,
-    cx: &App,
-) -> AnyElement {
-    let is_selected = selected_node_id == Some(node.id.as_str());
-    let padding_left = px(10.0 + (node.depth as f32) * 16.0);
-
-    h_flex()
-        .id(SharedString::from(node.id.clone()))
-        .w_full()
-        .items_center()
-        .gap_2()
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(cx.theme().transparent)
-        .px_2()
-        .py_1p5()
-        .pl(padding_left)
-        .when(is_selected, |this| {
-            this.bg(gpui::hsla(
-                214.0 / 360.0,
-                0.58,
-                0.50,
-                if sidebar_is_focused { 0.18 } else { 0.10 },
-            ))
-            .border_color(gpui::hsla(
-                214.0 / 360.0,
-                0.58,
-                0.50,
-                if sidebar_is_focused { 0.55 } else { 0.24 },
-            ))
-        })
-        .when(!is_selected, |this| {
-            this.hover(|style| style.bg(gpui::hsla(214.0 / 360.0, 0.18, 0.48, 0.08)))
-        })
-        .child(render_disclosure(&node))
-        .child(provider_icon(ProviderIconName::Sqlite, px(16.0)))
-        .child(
-            Label::new(node.label.clone())
-                .text_sm()
-                .text_color(cx.theme().foreground),
-        )
-        .cursor_pointer()
-        .on_click(move |_, window, cx| {
-            window.focus(&sidebar_focus_handle);
-            cx.global::<WorkspaceStore>()
-                .deref()
-                .clone()
-                .update(cx, |workspace, cx| {
-                    workspace.select_node(node.id.clone(), cx)
-                });
-        })
-        .into_any_element()
+fn render_icon(icon: SidebarIcon, node: &VisibleSidebarNode, cx: &App) -> AnyElement {
+    match icon {
+        SidebarIcon::Provider(ProviderIconName::Sqlite) => provider_icon(ProviderIconName::Sqlite, px(16.0)),
+        SidebarIcon::Lucide(icon) => Icon::new(icon)
+            .with_size(if matches!(node.kind, SidebarNodeKind::Field) {
+                Size::XSmall
+            } else {
+                Size::Small
+            })
+            .text_color(cx.theme().muted_foreground)
+            .into_any_element(),
+    }
 }
 
 fn render_disclosure(node: &VisibleSidebarNode) -> impl IntoElement {
@@ -526,7 +658,14 @@ fn selected_node_description(node: &VisibleSidebarNode, i18n: &I18n) -> SharedSt
     match node.kind {
         SidebarNodeKind::Connection => i18n.t("home-connection-description").into(),
         SidebarNodeKind::Namespace => i18n.t("home-namespace-description").into(),
-        SidebarNodeKind::ResourceGroup => i18n.t("home-resource-group-description").into(),
+        SidebarNodeKind::ResourceBucket => i18n.t("home-resource-group-description").into(),
+        SidebarNodeKind::Resource => i18n.t("home-resource-description").into(),
+        SidebarNodeKind::ResourceChildBucket => i18n.t("home-resource-child-group-description").into(),
+        SidebarNodeKind::Field => i18n.t("home-field-description").into(),
+        SidebarNodeKind::Key => i18n.t("home-key-description").into(),
+        SidebarNodeKind::Index => i18n.t("home-index-description").into(),
+        SidebarNodeKind::Loading => i18n.t("sidebar-loading").into(),
+        SidebarNodeKind::Error => i18n.t("sidebar-load-error").into(),
     }
 }
 
@@ -544,68 +683,156 @@ fn render_selected_node_icon(node: Option<&VisibleSidebarNode>, cx: &App) -> Any
     }
 }
 
+fn detail_row(label: String, value: SharedString, cx: &App) -> impl IntoElement {
+    h_flex()
+        .items_start()
+        .gap_3()
+        .child(
+            Label::new(label)
+                .text_sm()
+                .text_color(cx.theme().muted_foreground),
+        )
+        .child(
+            Label::new(value)
+                .text_sm()
+                .text_color(cx.theme().foreground),
+        )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::sidebar_model::SidebarTree;
-    use crate::{
-        app_paths::AppPaths,
-        config::{
-            AppConfigFile, LoadedAppConfig, ResolvedConnectionProfile, ResolvedProviderConfig,
-            StoredConnectionProfile,
-        },
+    use super::{SidebarIcon, SidebarTree};
+    use crate::views::home::sidebar_model::{
+        SidebarEphemeralRow, SidebarNode, SidebarNodeKind, connection_node_id, namespace_node_id,
+        resource_node_id,
     };
-    use kandb_provider_sqlite::{SqliteConfig, SqliteLocation};
-    use std::{collections::BTreeSet, path::PathBuf};
+    use kandb_assets::{IconName, ProviderIconName};
 
     fn sample_tree() -> SidebarTree {
-        SidebarTree::from_config(
-            &LoadedAppConfig {
-            paths: AppPaths::from_roots(PathBuf::from("/tmp/config"), PathBuf::from("/tmp/data")),
-            file: AppConfigFile {
-                version: 1,
-                default_connection_id: Some("local-main".to_owned()),
-                connections: vec![StoredConnectionProfile {
-                    id: "local-main".to_owned(),
-                    name: "Local Main".to_owned(),
-                    provider: "sqlite".to_owned(),
-                    config: toml::Table::new(),
+        SidebarTree::new(vec![SidebarNode {
+            id: connection_node_id("local"),
+            label: "Local".into(),
+            kind: SidebarNodeKind::Connection,
+            icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+            parent_id: None,
+            trailing_label: None,
+            badge_count: None,
+            ephemeral_child: None,
+            children: vec![SidebarNode {
+                id: namespace_node_id("local", "main"),
+                label: "main".into(),
+                kind: SidebarNodeKind::Namespace,
+                icon: SidebarIcon::Lucide(IconName::HardDrive),
+                parent_id: Some(connection_node_id("local")),
+                trailing_label: None,
+                badge_count: None,
+                ephemeral_child: None,
+                children: vec![SidebarNode {
+                    id: resource_node_id("local", "main", "users"),
+                    label: "users".into(),
+                    kind: SidebarNodeKind::Resource,
+                    icon: SidebarIcon::Lucide(IconName::Table),
+                    parent_id: Some("bucket".into()),
+                    trailing_label: None,
+                    badge_count: None,
+                    children: Vec::new(),
+                    ephemeral_child: None,
                 }],
-            },
-            resolved_connections: vec![ResolvedConnectionProfile {
-                id: "local-main".to_owned(),
-                name: "Local Main".to_owned(),
-                provider: ResolvedProviderConfig::Sqlite(SqliteConfig {
-                    location: SqliteLocation::Memory,
-                    read_only: false,
-                    create_if_missing: true,
-                }),
             }],
-            },
-            &crate::i18n::I18n::english_for_test(),
-        )
+        }])
     }
 
-    #[test]
-    fn sidebar_tree_has_default_expanded_connection_and_namespace() {
+    #[::core::prelude::v1::test]
+    fn refresh_target_uses_selected_connection() {
         let tree = sample_tree();
-        let expanded = tree.default_expanded_node_ids();
+        let connection_id = connection_node_id("local");
 
         assert_eq!(
-            expanded,
-            BTreeSet::from([
-                "connection:local-main".to_owned(),
-                "namespace:local-main:main".to_owned(),
-            ])
+            tree.connection_node_id_for(&connection_id),
+            Some(connection_id.as_str())
         );
     }
 
-    #[test]
-    fn selected_node_description_mentions_placeholder_groups() {
+    #[::core::prelude::v1::test]
+    fn refresh_target_resolves_nested_node_to_connection() {
         let tree = sample_tree();
-        let visible = tree.visible_nodes(&tree.default_expanded_node_ids());
-        let description =
-            super::selected_node_description(&visible[2], &crate::i18n::I18n::english_for_test());
+        let resource_id = resource_node_id("local", "main", "users");
+        let connection_id = connection_node_id("local");
 
-        assert!(description.contains("Placeholder resource group"));
+        assert_eq!(
+            tree.connection_node_id_for(&resource_id),
+            Some(connection_id.as_str())
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn delete_only_enables_for_connection_node() {
+        let tree = sample_tree();
+        let connection_id = connection_node_id("local");
+        let resource_id = resource_node_id("local", "main", "users");
+
+        assert!(tree.is_connection_node(&connection_id));
+        assert!(!tree.is_connection_node(&resource_id));
+    }
+
+    #[::core::prelude::v1::test]
+    fn default_selection_prefers_configured_connection() {
+        let tree = SidebarTree::new(vec![
+            SidebarNode {
+                id: connection_node_id("first"),
+                label: "First".into(),
+                kind: SidebarNodeKind::Connection,
+                icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+                parent_id: None,
+                trailing_label: None,
+                badge_count: None,
+                children: Vec::new(),
+                ephemeral_child: None,
+            },
+            SidebarNode {
+                id: connection_node_id("preferred"),
+                label: "Preferred".into(),
+                kind: SidebarNodeKind::Connection,
+                icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+                parent_id: None,
+                trailing_label: None,
+                badge_count: None,
+                children: Vec::new(),
+                ephemeral_child: None,
+            },
+        ]);
+        let preferred_id = connection_node_id("preferred");
+
+        assert_eq!(
+            tree.default_selected_node_id(Some("preferred")),
+            Some(preferred_id.as_str())
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn default_expansion_skips_loading_placeholder_children() {
+        let tree = SidebarTree::new(vec![SidebarNode {
+            id: connection_node_id("local"),
+            label: "Local".into(),
+            kind: SidebarNodeKind::Connection,
+            icon: SidebarIcon::Provider(ProviderIconName::Sqlite),
+            parent_id: None,
+            trailing_label: None,
+            badge_count: None,
+            children: Vec::new(),
+            ephemeral_child: Some(SidebarEphemeralRow {
+                id: "ephemeral-test".into(),
+                label: "Loading".into(),
+                kind: SidebarNodeKind::Loading,
+                icon: SidebarIcon::Lucide(IconName::SquareTerminal),
+                parent_id: connection_node_id("local"),
+                trailing_label: None,
+            }),
+        }]);
+
+        assert_eq!(
+            tree.default_expanded_node_ids(None),
+            std::collections::BTreeSet::from([connection_node_id("local")])
+        );
     }
 }

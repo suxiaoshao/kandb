@@ -1,6 +1,6 @@
 use crate::{
     FieldMeta, ListResourcesPage, ListResourcesRequest, ProviderError, ProviderErrorKind,
-    QueryResult, ReadRequest, ResourceRef, Result,
+    QueryResult, ReadRequest, ResourceIndexInfo, ResourceKeyInfo, ResourceRef, Result,
 };
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
@@ -66,6 +66,10 @@ pub trait Connection: Send + Sync {
     ) -> Result<ListResourcesPage>;
     async fn list_fields(&self, resource: &ResourceRef) -> Result<Option<Vec<FieldMeta>>>;
 
+    fn resource_structure_introspector(&self) -> Option<&dyn ResourceStructureIntrospector> {
+        None
+    }
+
     fn text_query_executor(&self) -> Option<&dyn TextQueryExecutor> {
         None
     }
@@ -99,6 +103,13 @@ pub trait ResourceReader: Send + Sync {
 
 pub trait TextQueryBuilder: Send + Sync {
     fn build_read_all_query(&self, resource: &ResourceRef) -> Result<Option<String>>;
+}
+
+#[async_trait]
+pub trait ResourceStructureIntrospector: Send + Sync {
+    async fn list_keys(&self, resource: &ResourceRef) -> Result<Option<Vec<ResourceKeyInfo>>>;
+    async fn list_indexes(&self, resource: &ResourceRef)
+    -> Result<Option<Vec<ResourceIndexInfo>>>;
 }
 
 pub async fn execute_text_query(
@@ -152,4 +163,38 @@ pub fn build_read_all_query(
     })?;
 
     builder.build_read_all_query(resource)
+}
+
+pub async fn list_keys(
+    connection: &dyn Connection,
+    resource: &ResourceRef,
+) -> Result<Option<Vec<ResourceKeyInfo>>> {
+    let introspector = connection.resource_structure_introspector().ok_or_else(|| {
+        ProviderError::new(
+            ProviderErrorKind::UnsupportedCapability,
+            format!(
+                "provider `{}` does not support key metadata",
+                connection.kind()
+            ),
+        )
+    })?;
+
+    introspector.list_keys(resource).await
+}
+
+pub async fn list_indexes(
+    connection: &dyn Connection,
+    resource: &ResourceRef,
+) -> Result<Option<Vec<ResourceIndexInfo>>> {
+    let introspector = connection.resource_structure_introspector().ok_or_else(|| {
+        ProviderError::new(
+            ProviderErrorKind::UnsupportedCapability,
+            format!(
+                "provider `{}` does not support index metadata",
+                connection.kind()
+            ),
+        )
+    })?;
+
+    introspector.list_indexes(resource).await
 }

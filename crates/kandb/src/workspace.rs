@@ -1,6 +1,7 @@
 use crate::{
     app_paths::AppPaths,
     errors::{KandbError, KandbResult},
+    views::home::sidebar_model::persisted_connection_node_id,
 };
 use gpui::{
     App, Bounds, Context, Entity, Global, Pixels, Task, Timer, WindowBounds, point, px, size,
@@ -182,9 +183,10 @@ impl WorkspaceState {
         cx.notify();
     }
 
-    pub(crate) fn ensure_initial_sidebar_state(
+    pub(crate) fn reconcile_sidebar_state(
         &mut self,
         valid_node_ids: &BTreeSet<String>,
+        settled_connection_node_ids: &BTreeSet<String>,
         default_selected_node_id: Option<&str>,
         default_expanded_node_ids: &BTreeSet<String>,
         cx: &mut Context<Self>,
@@ -200,13 +202,27 @@ impl WorkspaceState {
         let before_expanded = self.persisted.expanded_node_ids.clone();
         self.persisted
             .expanded_node_ids
-            .retain(|node_id| valid_node_ids.contains(node_id));
+            .retain(|node_id| {
+                if valid_node_ids.contains(node_id) {
+                    return true;
+                }
+
+                persisted_connection_node_id(node_id)
+                    .is_some_and(|connection_id| !settled_connection_node_ids.contains(&connection_id))
+            });
 
         if self
             .persisted
             .selected_node_id
             .as_ref()
-            .is_some_and(|node_id| !valid_node_ids.contains(node_id))
+            .is_some_and(|node_id| {
+                if valid_node_ids.contains(node_id) {
+                    return false;
+                }
+
+                persisted_connection_node_id(node_id)
+                    .is_none_or(|connection_id| settled_connection_node_ids.contains(&connection_id))
+            })
         {
             self.persisted.selected_node_id = default_selected_node_id.map(ToOwned::to_owned);
         }
