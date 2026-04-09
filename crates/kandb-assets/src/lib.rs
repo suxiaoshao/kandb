@@ -54,7 +54,6 @@ define_icon_assets!(
     Plus => "plus",
     RefreshCw => "refresh-cw",
     Rows3 => "rows-3",
-    Server => "server",
     SquareTerminal => "square-terminal",
     Table => "table",
     Trash2 => "trash-2",

@@ -1,14 +1,12 @@
 use crate::{
     app_paths::AppPaths,
     errors::{KandbError, KandbResult},
-    views::home::sidebar_model::persisted_connection_node_id,
 };
 use gpui::{
     App, Bounds, Context, Entity, Global, Pixels, Task, Timer, WindowBounds, point, px, size,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
     fs,
     io::ErrorKind,
     ops::Deref,
@@ -55,10 +53,6 @@ pub(crate) struct PersistedWorkspaceState {
     #[serde(default = "default_sidebar_width")]
     sidebar_width: f32,
     #[serde(default)]
-    selected_node_id: Option<String>,
-    #[serde(default)]
-    expanded_node_ids: BTreeSet<String>,
-    #[serde(default)]
     home_window: Option<PersistedWindowBounds>,
 }
 
@@ -84,8 +78,6 @@ impl Default for PersistedWorkspaceState {
         Self {
             version: WORKSPACE_STATE_VERSION,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
-            selected_node_id: None,
-            expanded_node_ids: BTreeSet::new(),
             home_window: None,
         }
     }
@@ -141,105 +133,6 @@ impl WorkspaceState {
         self.persisted.sidebar_width = width_value;
         self.schedule_save(cx);
         cx.notify();
-    }
-
-    pub(crate) fn selected_node_id(&self) -> Option<&str> {
-        self.persisted.selected_node_id.as_deref()
-    }
-
-    pub(crate) fn select_node(&mut self, node_id: impl Into<String>, cx: &mut Context<Self>) {
-        let node_id = node_id.into();
-        if self.persisted.selected_node_id.as_deref() == Some(node_id.as_str()) {
-            return;
-        }
-
-        self.persisted.selected_node_id = Some(node_id);
-        self.schedule_save(cx);
-        cx.notify();
-    }
-
-    pub(crate) fn expanded_node_ids(&self) -> &BTreeSet<String> {
-        &self.persisted.expanded_node_ids
-    }
-
-    pub(crate) fn set_node_expanded(
-        &mut self,
-        node_id: impl Into<String>,
-        expanded: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let node_id = node_id.into();
-        let changed = if expanded {
-            self.persisted.expanded_node_ids.insert(node_id)
-        } else {
-            self.persisted.expanded_node_ids.remove(&node_id)
-        };
-
-        if !changed {
-            return;
-        }
-
-        self.schedule_save(cx);
-        cx.notify();
-    }
-
-    pub(crate) fn reconcile_sidebar_state(
-        &mut self,
-        valid_node_ids: &BTreeSet<String>,
-        settled_connection_node_ids: &BTreeSet<String>,
-        default_selected_node_id: Option<&str>,
-        default_expanded_node_ids: &BTreeSet<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let mut changed = false;
-
-        if self.persisted.expanded_node_ids.is_empty() && !default_expanded_node_ids.is_empty() {
-            self.persisted.expanded_node_ids = default_expanded_node_ids.clone();
-            changed = true;
-        }
-
-        let before_selected = self.persisted.selected_node_id.clone();
-        let before_expanded = self.persisted.expanded_node_ids.clone();
-        self.persisted
-            .expanded_node_ids
-            .retain(|node_id| {
-                if valid_node_ids.contains(node_id) {
-                    return true;
-                }
-
-                persisted_connection_node_id(node_id)
-                    .is_some_and(|connection_id| !settled_connection_node_ids.contains(&connection_id))
-            });
-
-        if self
-            .persisted
-            .selected_node_id
-            .as_ref()
-            .is_some_and(|node_id| {
-                if valid_node_ids.contains(node_id) {
-                    return false;
-                }
-
-                persisted_connection_node_id(node_id)
-                    .is_none_or(|connection_id| settled_connection_node_ids.contains(&connection_id))
-            })
-        {
-            self.persisted.selected_node_id = default_selected_node_id.map(ToOwned::to_owned);
-        }
-
-        if self.persisted.selected_node_id.is_none()
-            && let Some(default_selected_node_id) = default_selected_node_id
-        {
-            self.persisted.selected_node_id = Some(default_selected_node_id.to_owned());
-        }
-
-        if self.persisted.selected_node_id != before_selected
-            || self.persisted.expanded_node_ids != before_expanded
-            || changed
-        {
-            self.schedule_save(cx);
-            cx.notify();
-        }
     }
 
     pub(crate) fn window_bounds(&self) -> Option<WindowBounds> {
@@ -362,6 +255,7 @@ mod tests {
 
         assert!(paths.workspace_state_file().exists());
         assert_eq!(loaded.state.sidebar_width, 280.0);
+        assert_eq!(loaded.state.home_window, None);
     }
 
     #[test]
@@ -375,6 +269,7 @@ mod tests {
         let loaded = LoadedWorkspaceState::load_or_create(&paths).expect("load workspace state");
 
         assert_eq!(loaded.state.sidebar_width, 280.0);
+        assert_eq!(loaded.state.home_window, None);
     }
 
     #[test]

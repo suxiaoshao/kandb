@@ -1,0 +1,11 @@
+app-menu-about = About {$app_name}
+app-menu-services = Services
+app-menu-hide = Hide {$app_name}
+app-menu-hide-others = Hide Others
+app-menu-show-all = Show All
+app-menu-quit = Quit {$app_name}
+app-menu-file = File
+app-menu-close-window = Close Window
+app-menu-window = Window
+app-menu-minimize = Minimize
+app-menu-zoom = Zoom

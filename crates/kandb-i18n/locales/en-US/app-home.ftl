@@ -1,0 +1,9 @@
+app-home-sidebar-title = Connections
+app-home-sidebar-refresh-all = Refresh all connections
+app-home-sidebar-refresh-connection = Refresh selected connection
+app-home-sidebar-delete-connection = Delete selected connection (coming soon)
+app-home-sidebar-delete-select-connection = Select a connection first (delete coming soon)
+app-home-sidebar-add-connection = Add connection (coming soon)
+app-home-sidebar-loading = Loading…
+app-home-sidebar-load-error = Metadata load failed
+app-home-sidebar-provider-unsupported = Provider `{$provider}` is not supported in the sidebar yet

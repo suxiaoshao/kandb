@@ -55,8 +55,6 @@ pub(crate) enum KandbError {
     UnsupportedConfigVersion { version: u32 },
     #[error("duplicate connection id `{0}` in config")]
     DuplicateConnectionId(String),
-    #[error("default connection `{0}` does not exist")]
-    MissingDefaultConnection(String),
     #[error(
         "failed to decode provider config for connection `{connection_id}` (`{provider}`): {message}"
     )]

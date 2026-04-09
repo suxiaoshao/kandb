@@ -1,0 +1,17 @@
+provider-sqlite-connection-title = SQLite Connection
+provider-sqlite-field-location = Location
+provider-sqlite-field-location-help = Choose whether the database lives in memory, at a file path, or behind a SQLite URI.
+provider-sqlite-option-memory = Memory
+provider-sqlite-option-path = Path
+provider-sqlite-option-uri = URI
+provider-sqlite-field-location-value = Path or URI
+provider-sqlite-field-location-value-help = Leave empty for in-memory databases.
+provider-sqlite-field-read-only = Read Only
+provider-sqlite-field-create-if-missing = Create If Missing
+provider-sqlite-sidebar-group-tables = Tables
+provider-sqlite-sidebar-group-views = Views
+provider-sqlite-sidebar-group-columns = Columns
+provider-sqlite-sidebar-group-keys = Keys
+provider-sqlite-sidebar-group-indexes = Indexes
+provider-sqlite-key-unnamed = <unnamed>
+provider-sqlite-key-unique = UNIQUE

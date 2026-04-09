@@ -1,8 +1,8 @@
 use crate::{APP_TITLE, i18n::I18n, views::about::open_about_window};
-use fluent_bundle::FluentArgs;
 #[cfg(target_os = "macos")]
 use gpui::SystemMenuType;
 use gpui::{App, KeyBinding, Menu, MenuItem, actions};
+use kandb_i18n::FluentArgs;
 use tracing::{Level, event};
 
 actions!(
@@ -43,23 +43,26 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
-    let mut app_items = vec![MenuItem::action(app_name_message(i18n, "menu-about"), About)];
+    let mut app_items = vec![MenuItem::action(
+        app_name_message(i18n, "app-menu-about"),
+        About,
+    )];
 
     #[cfg(target_os = "macos")]
     {
         app_items.extend([
             MenuItem::separator(),
-            MenuItem::os_submenu(i18n.t("menu-services"), SystemMenuType::Services),
+            MenuItem::os_submenu(i18n.t("app-menu-services"), SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action(app_name_message(i18n, "menu-hide"), Hide),
-            MenuItem::action(i18n.t("menu-hide-others"), HideOthers),
-            MenuItem::action(i18n.t("menu-show-all"), ShowAll),
+            MenuItem::action(app_name_message(i18n, "app-menu-hide"), Hide),
+            MenuItem::action(i18n.t("app-menu-hide-others"), HideOthers),
+            MenuItem::action(i18n.t("app-menu-show-all"), ShowAll),
         ]);
     }
 
     app_items.extend([
         MenuItem::separator(),
-        MenuItem::action(app_name_message(i18n, "menu-quit"), Quit),
+        MenuItem::action(app_name_message(i18n, "app-menu-quit"), Quit),
     ]);
 
     vec![
@@ -68,14 +71,17 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             items: app_items,
         },
         Menu {
-            name: i18n.t("menu-file").into(),
-            items: vec![MenuItem::action(i18n.t("menu-close-window"), CloseWindow)],
+            name: i18n.t("app-menu-file").into(),
+            items: vec![MenuItem::action(
+                i18n.t("app-menu-close-window"),
+                CloseWindow,
+            )],
         },
         Menu {
-            name: i18n.t("menu-window").into(),
+            name: i18n.t("app-menu-window").into(),
             items: vec![
-                MenuItem::action(i18n.t("menu-minimize"), Minimize),
-                MenuItem::action(i18n.t("menu-zoom"), Zoom),
+                MenuItem::action(i18n.t("app-menu-minimize"), Minimize),
+                MenuItem::action(i18n.t("app-menu-zoom"), Zoom),
             ],
         },
     ]

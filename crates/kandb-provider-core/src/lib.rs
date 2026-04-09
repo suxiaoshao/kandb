@@ -5,36 +5,29 @@ mod traits;
 
 pub use error::{ProviderError, ProviderErrorKind, Result};
 pub use model::{
-    FieldMeta, ListResourcesPage, ListResourcesRequest, LogicalType, NamespaceInfo, NamespaceKind,
-    NativeValue, QueryResult, QueryRow, ReadRequest, ResourceIndexInfo, ResourceInfo,
-    ResourceKeyInfo, ResourceKeyKind, ResourceKind, ResourceRef, Value,
+    ConnectionFormSchema, FormField, FormFieldKind, FormSelectOption, IconToken, SidebarTree,
+    TreeChildren, TreeNode,
 };
 pub use registry::ProviderRegistry;
-pub use traits::{
-    Connection, ErasedProviderFactory, ProviderFactory, ResourceReader,
-    ResourceStructureIntrospector, TextQueryBuilder, TextQueryExecutor, build_read_all_query,
-    execute_text_query, list_indexes, list_keys, read_resource,
-};
+pub use traits::{Connection, ErasedProviderPlugin, ProviderPlugin};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::executor::block_on;
-    use indexmap::IndexMap;
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
-    use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     struct MockConfig {
         dsn: String,
     }
 
-    struct MockFactory;
+    struct MockPlugin;
 
     #[async_trait]
-    impl ProviderFactory for MockFactory {
+    impl ProviderPlugin for MockPlugin {
         type Config = MockConfig;
         type Connection = MockConnection;
 
@@ -44,6 +37,21 @@ mod tests {
 
         fn display_name(&self) -> &'static str {
             "Mock"
+        }
+
+        fn connection_form(&self, locale: &str) -> ConnectionFormSchema {
+            ConnectionFormSchema {
+                title: format!("Mock {locale}"),
+                fields: vec![FormField {
+                    key: "dsn".into(),
+                    label: "DSN".into(),
+                    kind: FormFieldKind::Text,
+                    required: true,
+                    help_text: None,
+                    placeholder: Some("memory://demo".into()),
+                    options: Vec::new(),
+                }],
+            }
         }
 
         async fn connect(&self, config: Self::Config) -> Result<Self::Connection> {
@@ -81,231 +89,28 @@ mod tests {
             Ok(())
         }
 
-        async fn list_namespaces(&self) -> Result<Vec<NamespaceInfo>> {
-            Ok(vec![NamespaceInfo {
-                id: "public".into(),
-                name: "public".into(),
-                kind: NamespaceKind::Schema,
-                parent_id: None,
-            }])
-        }
-
-        async fn list_resources(
-            &self,
-            namespace_id: &str,
-            request: ListResourcesRequest,
-        ) -> Result<ListResourcesPage> {
-            let first_page = request.cursor.is_none();
-            let table_name = if first_page { "users" } else { "orders" };
-
-            Ok(ListResourcesPage {
-                items: vec![ResourceInfo {
-                    resource: ResourceRef {
-                        namespace_id: namespace_id.into(),
-                        resource_id: table_name.into(),
-                    },
-                    name: table_name.into(),
-                    kind: ResourceKind::Table,
+        async fn load_sidebar(&self, _locale: &str) -> Result<SidebarTree> {
+            Ok(SidebarTree {
+                roots: vec![TreeNode {
+                    id: "root".into(),
+                    label: "Root".into(),
+                    icon: IconToken::Database,
+                    children: TreeChildren::Branch(vec![TreeNode {
+                        id: "leaf".into(),
+                        label: "Leaf".into(),
+                        icon: IconToken::Table,
+                        children: TreeChildren::Leaf,
+                    }]),
                 }],
-                next_cursor: first_page.then(|| "cursor-2".into()),
             })
-        }
-
-        async fn list_fields(&self, resource: &ResourceRef) -> Result<Option<Vec<FieldMeta>>> {
-            if resource.resource_id == "documents" {
-                return Ok(None);
-            }
-
-            Ok(Some(vec![
-                FieldMeta {
-                    ordinal: Some(0),
-                    name: "id".into(),
-                    logical_type: Some(LogicalType::Int),
-                    native_type: Some("INTEGER".into()),
-                    nullable: Some(false),
-                    default_value_sql: None,
-                    primary_key_ordinal: Some(1),
-                    hidden: Some(false),
-                },
-                FieldMeta {
-                    ordinal: Some(1),
-                    name: "id".into(),
-                    logical_type: Some(LogicalType::Int),
-                    native_type: Some("INTEGER".into()),
-                    nullable: Some(false),
-                    default_value_sql: None,
-                    primary_key_ordinal: None,
-                    hidden: Some(false),
-                },
-            ]))
-        }
-
-        fn text_query_executor(&self) -> Option<&dyn TextQueryExecutor> {
-            Some(self)
-        }
-
-        fn resource_reader(&self) -> Option<&dyn ResourceReader> {
-            Some(self)
-        }
-
-        fn text_query_builder(&self) -> Option<&dyn TextQueryBuilder> {
-            Some(self)
-        }
-
-        fn resource_structure_introspector(&self) -> Option<&dyn ResourceStructureIntrospector> {
-            Some(self)
-        }
-    }
-
-    #[async_trait]
-    impl TextQueryExecutor for MockConnection {
-        async fn execute_text_query(
-            &self,
-            _namespace_id: Option<&str>,
-            _query: &str,
-        ) -> Result<QueryResult> {
-            Ok(QueryResult {
-                columns: Some(vec![
-                    FieldMeta {
-                        ordinal: Some(0),
-                        name: "id".into(),
-                        logical_type: Some(LogicalType::Int),
-                        native_type: Some("INTEGER".into()),
-                        nullable: Some(false),
-                        default_value_sql: None,
-                        primary_key_ordinal: Some(1),
-                        hidden: Some(false),
-                    },
-                    FieldMeta {
-                        ordinal: Some(1),
-                        name: "id".into(),
-                        logical_type: Some(LogicalType::Int),
-                        native_type: Some("INTEGER".into()),
-                        nullable: Some(false),
-                        default_value_sql: None,
-                        primary_key_ordinal: None,
-                        hidden: Some(false),
-                    },
-                ]),
-                rows: vec![QueryRow::Fields(vec![Value::Integer(1), Value::Integer(2)])],
-            })
-        }
-    }
-
-    #[async_trait]
-    impl ResourceReader for MockConnection {
-        async fn read_resource(
-            &self,
-            resource: &ResourceRef,
-            _request: ReadRequest,
-        ) -> Result<QueryResult> {
-            let rows = match resource.resource_id.as_str() {
-                "redis:session:1" => {
-                    let mut document = IndexMap::new();
-                    document.insert("key".into(), Value::Text("session:1".into()));
-                    document.insert("type".into(), Value::Text("hash".into()));
-                    document.insert("ttl".into(), Value::Integer(60));
-                    document.insert(
-                        "value".into(),
-                        Value::Object(IndexMap::from([
-                            ("user_id".into(), Value::Integer(7)),
-                            ("active".into(), Value::Bool(true)),
-                        ])),
-                    );
-                    vec![QueryRow::Document(document)]
-                }
-                "documents" => {
-                    let mut document = IndexMap::new();
-                    document.insert("_id".into(), Value::Text("abc".into()));
-                    document.insert("name".into(), Value::Text("mongo".into()));
-                    vec![QueryRow::Document(document)]
-                }
-                _ => vec![QueryRow::Fields(vec![
-                    Value::Integer(1),
-                    Value::Text("alice".into()),
-                ])],
-            };
-
-            Ok(QueryResult {
-                columns: None,
-                rows,
-            })
-        }
-    }
-
-    impl TextQueryBuilder for MockConnection {
-        fn build_read_all_query(&self, resource: &ResourceRef) -> Result<Option<String>> {
-            Ok(Some(format!(
-                "SELECT * FROM {}.{}",
-                resource.namespace_id, resource.resource_id
-            )))
-        }
-    }
-
-    #[async_trait]
-    impl ResourceStructureIntrospector for MockConnection {
-        async fn list_keys(&self, resource: &ResourceRef) -> Result<Option<Vec<ResourceKeyInfo>>> {
-            if resource.resource_id == "documents" {
-                return Ok(None);
-            }
-
-            Ok(Some(vec![ResourceKeyInfo {
-                name: Some("users_pkey".into()),
-                kind: ResourceKeyKind::Primary,
-                columns: vec!["id".into()],
-            }]))
-        }
-
-        async fn list_indexes(
-            &self,
-            resource: &ResourceRef,
-        ) -> Result<Option<Vec<ResourceIndexInfo>>> {
-            if resource.resource_id == "documents" {
-                return Ok(None);
-            }
-
-            Ok(Some(vec![ResourceIndexInfo {
-                name: "users_name_idx".into(),
-                columns: vec!["name".into()],
-                unique: false,
-            }]))
-        }
-    }
-
-    struct ReadOnlyConnection;
-
-    #[async_trait]
-    impl Connection for ReadOnlyConnection {
-        fn kind(&self) -> &'static str {
-            "readonly"
-        }
-
-        async fn ping(&self) -> Result<()> {
-            Ok(())
-        }
-
-        async fn list_namespaces(&self) -> Result<Vec<NamespaceInfo>> {
-            Ok(Vec::new())
-        }
-
-        async fn list_resources(
-            &self,
-            _namespace_id: &str,
-            _request: ListResourcesRequest,
-        ) -> Result<ListResourcesPage> {
-            Ok(ListResourcesPage::default())
-        }
-
-        async fn list_fields(&self, _resource: &ResourceRef) -> Result<Option<Vec<FieldMeta>>> {
-            Ok(None)
         }
     }
 
     #[test]
-    fn erased_factory_roundtrip_and_registry_connect() {
+    fn erased_plugin_roundtrip_and_registry_connect() {
         block_on(async {
             let mut registry = ProviderRegistry::new();
-            registry.register(Arc::new(MockFactory)).unwrap();
+            registry.register(Arc::new(MockPlugin)).unwrap();
 
             let connection = registry
                 .connect(
@@ -326,8 +131,8 @@ mod tests {
     #[test]
     fn invalid_config_maps_to_invalid_config_error() {
         block_on(async {
-            let factory = MockFactory;
-            let error = match factory
+            let plugin = MockPlugin;
+            let error = match plugin
                 .connect_erased(serde_json::json!({ "missing": "dsn" }))
                 .await
             {
@@ -340,217 +145,53 @@ mod tests {
     }
 
     #[test]
-    fn sql_results_keep_duplicate_columns_and_row_order() {
-        block_on(async {
-            let connection = MockConnection;
-            let result = execute_text_query(&connection, Some("public"), "SELECT 1")
-                .await
-                .unwrap();
+    fn connection_form_is_available_through_erased_plugin() {
+        let plugin: Arc<dyn ErasedProviderPlugin> = Arc::new(MockPlugin);
+        let form = plugin.connection_form("en-US");
 
-            let columns = result.columns.unwrap();
-            assert_eq!(columns.len(), 2);
-            assert_eq!(columns[0].name, "id");
-            assert_eq!(columns[1].name, "id");
-
-            match &result.rows[0] {
-                QueryRow::Fields(values) => {
-                    assert_eq!(values, &vec![Value::Integer(1), Value::Integer(2)]);
-                }
-                row => panic!("expected fields row, got {row:?}"),
-            }
-        });
+        assert_eq!(form.title, "Mock en-US");
+        assert_eq!(form.fields[0].key, "dsn");
     }
 
     #[test]
-    fn mongo_style_resources_can_omit_fields() {
-        block_on(async {
-            let connection = MockConnection;
-            let resource = ResourceRef {
-                namespace_id: "app".into(),
-                resource_id: "documents".into(),
-            };
-
-            assert_eq!(connection.list_fields(&resource).await.unwrap(), None);
-
-            let result = read_resource(&connection, &resource, ReadRequest::default())
-                .await
-                .unwrap();
-
-            match &result.rows[0] {
-                QueryRow::Document(document) => {
-                    assert_eq!(document.get("_id"), Some(&Value::Text("abc".into())));
-                }
-                row => panic!("expected document row, got {row:?}"),
-            }
-        });
-    }
-
-    #[test]
-    fn redis_style_resources_can_page_and_return_documents() {
-        block_on(async {
-            let connection = MockConnection;
-            let first_page = connection
-                .list_resources(
-                    "0",
-                    ListResourcesRequest {
-                        cursor: None,
-                        limit: Some(1),
-                        pattern: Some("session:*".into()),
-                    },
-                )
-                .await
-                .unwrap();
-
-            assert_eq!(first_page.items.len(), 1);
-            assert_eq!(first_page.next_cursor.as_deref(), Some("cursor-2"));
-
-            let second_page = connection
-                .list_resources(
-                    "0",
-                    ListResourcesRequest {
-                        cursor: first_page.next_cursor,
-                        limit: Some(1),
-                        pattern: Some("session:*".into()),
-                    },
-                )
-                .await
-                .unwrap();
-
-            assert_eq!(second_page.items[0].name, "orders");
-
-            let redis_result = read_resource(
-                &connection,
-                &ResourceRef {
-                    namespace_id: "0".into(),
-                    resource_id: "redis:session:1".into(),
-                },
-                ReadRequest::default(),
-            )
-            .await
-            .unwrap();
-
-            match &redis_result.rows[0] {
-                QueryRow::Document(document) => {
-                    assert_eq!(document.get("type"), Some(&Value::Text("hash".into())));
-                }
-                row => panic!("expected document row, got {row:?}"),
-            }
-        });
-    }
-
-    #[test]
-    fn unsupported_capabilities_return_expected_error() {
-        block_on(async {
-            let connection = ReadOnlyConnection;
-            let error = execute_text_query(&connection, None, "PING")
-                .await
-                .unwrap_err();
-
-            assert_eq!(error.kind(), ProviderErrorKind::UnsupportedCapability);
-        });
-    }
-
-    #[test]
-    fn structure_metadata_is_available_via_capability_helpers() {
-        block_on(async {
-            let connection = MockConnection;
-            let resource = ResourceRef {
-                namespace_id: "public".into(),
-                resource_id: "users".into(),
-            };
-
-            let keys = list_keys(&connection, &resource).await.unwrap().unwrap();
-            let indexes = list_indexes(&connection, &resource).await.unwrap().unwrap();
-
-            assert_eq!(keys[0].kind, ResourceKeyKind::Primary);
-            assert_eq!(keys[0].columns, vec!["id".to_string()]);
-            assert_eq!(indexes[0].name, "users_name_idx");
-        });
-    }
-
-    #[test]
-    fn value_datetime_variants_roundtrip_via_serde() {
-        let value = Value::Object(IndexMap::from([
-            (
-                "date".into(),
-                Value::Date(Date::from_calendar_date(2026, Month::April, 6).unwrap()),
-            ),
-            ("time".into(), Value::Time(Time::from_hms(1, 2, 3).unwrap())),
-            (
-                "datetime".into(),
-                Value::DateTime(PrimitiveDateTime::new(
-                    Date::from_calendar_date(2026, Month::April, 6).unwrap(),
-                    Time::from_hms(1, 2, 3).unwrap(),
-                )),
-            ),
-            (
-                "datetime_tz".into(),
-                Value::DateTimeTz(OffsetDateTime::from_unix_timestamp(1_775_440_923).unwrap()),
-            ),
-            ("decimal".into(), Value::Decimal("12.34".into())),
-            (
-                "native".into(),
-                Value::Native(NativeValue {
-                    type_name: "jsonb".into(),
-                    repr: serde_json::json!({"k": "v"}),
-                }),
-            ),
-        ]));
-
-        let json = serde_json::to_string(&value).unwrap();
-        let decoded: Value = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, value);
-    }
-
-    #[test]
-    fn read_all_query_builder_is_available_for_sql_style_connections() {
-        let connection = MockConnection;
-        let resource = ResourceRef {
-            namespace_id: "public".into(),
-            resource_id: "users".into(),
+    fn sidebar_tree_roundtrips_via_serde() {
+        let tree = SidebarTree {
+            roots: vec![TreeNode {
+                id: "root".into(),
+                label: "Root".into(),
+                icon: IconToken::Folder,
+                children: TreeChildren::Branch(vec![TreeNode {
+                    id: "leaf".into(),
+                    label: "Leaf".into(),
+                    icon: IconToken::Column,
+                    children: TreeChildren::Leaf,
+                }]),
+            }],
         };
 
-        let query = build_read_all_query(&connection, &resource).unwrap();
-        assert_eq!(query.as_deref(), Some("SELECT * FROM public.users"));
+        let json = serde_json::to_string(&tree).unwrap();
+        let decoded: SidebarTree = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, tree);
     }
 
     #[test]
-    fn read_request_offset_roundtrips_via_serde() {
-        let request = ReadRequest {
-            limit: Some(50),
-            offset: Some(100),
-        };
+    fn tree_children_leaf_and_empty_branch_stay_distinct() {
+        let leaf = TreeChildren::Leaf;
+        let branch = TreeChildren::Branch(Vec::new());
 
-        let json = serde_json::to_string(&request).unwrap();
-        let decoded: ReadRequest = serde_json::from_str(&json).unwrap();
+        assert_ne!(leaf, branch);
 
-        assert_eq!(decoded, request);
-    }
+        let leaf_json = serde_json::to_string(&leaf).unwrap();
+        let branch_json = serde_json::to_string(&branch).unwrap();
 
-    #[test]
-    fn field_meta_and_resource_kind_roundtrip_via_serde() {
-        let field = FieldMeta {
-            ordinal: Some(3),
-            name: "computed".into(),
-            logical_type: Some(LogicalType::Text),
-            native_type: Some("TEXT".into()),
-            nullable: Some(true),
-            default_value_sql: Some("'x'".into()),
-            primary_key_ordinal: None,
-            hidden: Some(true),
-        };
-
-        let field_json = serde_json::to_string(&field).unwrap();
-        let decoded_field: FieldMeta = serde_json::from_str(&field_json).unwrap();
-        assert_eq!(decoded_field, field);
-
-        let virtual_kind_json = serde_json::to_string(&ResourceKind::VirtualTable).unwrap();
-        let decoded_virtual_kind: ResourceKind = serde_json::from_str(&virtual_kind_json).unwrap();
-        assert_eq!(decoded_virtual_kind, ResourceKind::VirtualTable);
-
-        let shadow_kind_json = serde_json::to_string(&ResourceKind::ShadowTable).unwrap();
-        let decoded_shadow_kind: ResourceKind = serde_json::from_str(&shadow_kind_json).unwrap();
-        assert_eq!(decoded_shadow_kind, ResourceKind::ShadowTable);
+        assert_eq!(
+            serde_json::from_str::<TreeChildren>(&leaf_json).unwrap(),
+            leaf
+        );
+        assert_eq!(
+            serde_json::from_str::<TreeChildren>(&branch_json).unwrap(),
+            branch
+        );
     }
 }

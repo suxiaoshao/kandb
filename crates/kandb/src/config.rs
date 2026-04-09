@@ -19,8 +19,6 @@ const SQLITE_PROVIDER: &str = "sqlite";
 pub(crate) struct AppConfigFile {
     pub(crate) version: u32,
     #[serde(default)]
-    pub(crate) default_connection_id: Option<String>,
-    #[serde(default)]
     pub(crate) connections: Vec<StoredConnectionProfile>,
 }
 
@@ -37,7 +35,6 @@ impl Default for AppConfigFile {
     fn default() -> Self {
         Self {
             version: CONFIG_VERSION,
-            default_connection_id: None,
             connections: Vec::new(),
         }
     }
@@ -106,13 +103,6 @@ impl AppConfigFile {
 
             connection.resolve(paths.config_dir())?;
         }
-
-        if let Some(default_id) = &self.default_connection_id
-            && !self.connections.iter().any(|conn| conn.id == *default_id)
-        {
-            return Err(KandbError::MissingDefaultConnection(default_id.clone()));
-        }
-
         Ok(())
     }
 }
@@ -142,7 +132,7 @@ pub(crate) struct StoredConnectionProfile {
 
 impl StoredConnectionProfile {
     fn resolve(&self, config_dir: &Path) -> KandbResult<ResolvedConnectionProfile> {
-        let provider = match self.provider.as_str() {
+        let config_json = match self.provider.as_str() {
             SQLITE_PROVIDER => {
                 let config = parse_sqlite_config(&self.config, config_dir).map_err(|message| {
                     KandbError::ProviderConfigDecode {
@@ -151,18 +141,16 @@ impl StoredConnectionProfile {
                         message,
                     }
                 })?;
-                ResolvedProviderConfig::Sqlite(config)
+                serde_json::to_value(config).expect("sqlite config should serialize")
             }
-            _ => ResolvedProviderConfig::Unknown {
-                provider: self.provider.clone(),
-                config: self.config.clone(),
-            },
+            _ => toml_table_to_json(&self.config),
         };
 
         Ok(ResolvedConnectionProfile {
             id: self.id.clone(),
             name: self.name.clone(),
-            provider,
+            provider_kind: self.provider.clone(),
+            config_json,
         })
     }
 }
@@ -171,16 +159,8 @@ impl StoredConnectionProfile {
 pub(crate) struct ResolvedConnectionProfile {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) provider: ResolvedProviderConfig,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ResolvedProviderConfig {
-    Sqlite(SqliteConfig),
-    Unknown {
-        provider: String,
-        config: toml::Table,
-    },
+    pub(crate) provider_kind: String,
+    pub(crate) config_json: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,11 +234,15 @@ fn resolve_path(config_dir: &Path, raw_path: &str) -> KandbResult<PathBuf> {
     Ok(config_dir.join(path))
 }
 
+fn toml_table_to_json(table: &toml::Table) -> serde_json::Value {
+    serde_json::to_value(table).expect("toml config table should serialize")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfigFile, CONFIG_FILE_NAME, ResolvedProviderConfig, StoredConnectionProfile,
-        StoredSqliteConfig, StoredSqliteLocation,
+        AppConfigFile, CONFIG_FILE_NAME, StoredConnectionProfile, StoredSqliteConfig,
+        StoredSqliteLocation,
     };
     use crate::app_paths::AppPaths;
     use kandb_provider_sqlite::SqliteLocation;
@@ -300,7 +284,6 @@ mod tests {
             AppPaths::from_roots(temp_dir.path().join("config"), temp_dir.path().join("data"));
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: None,
             connections: vec![
                 sqlite_profile("main", StoredSqliteLocation::Memory),
                 sqlite_profile("main", StoredSqliteLocation::Memory),
@@ -311,23 +294,6 @@ mod tests {
 
         let error = AppConfigFile::load_or_create(&paths).expect_err("duplicate id should fail");
         assert!(error.to_string().contains("duplicate connection id"));
-    }
-
-    #[test]
-    fn missing_default_connection_is_rejected() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let paths =
-            AppPaths::from_roots(temp_dir.path().join("config"), temp_dir.path().join("data"));
-        let config = AppConfigFile {
-            version: 1,
-            default_connection_id: Some("missing".to_string()),
-            connections: vec![sqlite_profile("main", StoredSqliteLocation::Memory)],
-        };
-
-        config.save(&paths).expect("save config");
-
-        let error = AppConfigFile::load_or_create(&paths).expect_err("missing default should fail");
-        assert!(error.to_string().contains("default connection"));
     }
 
     #[test]
@@ -350,7 +316,6 @@ mod tests {
         );
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: Some("relative".to_string()),
             connections: vec![relative, memory, uri],
         };
 
@@ -360,21 +325,22 @@ mod tests {
             .resolve_connections(&paths)
             .expect("resolve connections");
 
-        assert!(matches!(
-            &resolved[0].provider,
-            ResolvedProviderConfig::Sqlite(config)
-                if config.location == SqliteLocation::Path(paths.config_dir().join("db/main.sqlite"))
-        ));
-        assert!(matches!(
-            &resolved[1].provider,
-            ResolvedProviderConfig::Sqlite(config) if config.location == SqliteLocation::Memory
-        ));
-        assert!(matches!(
-            &resolved[2].provider,
-            ResolvedProviderConfig::Sqlite(config)
-                if config.location
-                    == SqliteLocation::Uri("file:memdb1?mode=memory&cache=shared".to_string())
-        ));
+        let relative_config: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[0].config_json.clone()).unwrap();
+        let memory_config: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[1].config_json.clone()).unwrap();
+        let uri_config: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[2].config_json.clone()).unwrap();
+
+        assert_eq!(
+            relative_config.location,
+            SqliteLocation::Path(paths.config_dir().join("db/main.sqlite"))
+        );
+        assert_eq!(memory_config.location, SqliteLocation::Memory);
+        assert_eq!(
+            uri_config.location,
+            SqliteLocation::Uri("file:memdb1?mode=memory&cache=shared".to_string())
+        );
     }
 
     #[test]
@@ -389,7 +355,6 @@ mod tests {
         );
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: Some("redis-local".to_string()),
             connections: vec![StoredConnectionProfile {
                 id: "redis-local".to_string(),
                 name: "Redis Local".to_string(),
@@ -414,7 +379,6 @@ mod tests {
             AppPaths::from_roots(temp_dir.path().join("config"), temp_dir.path().join("data"));
         let config = AppConfigFile {
             version: 1,
-            default_connection_id: Some("main".to_string()),
             connections: vec![sqlite_profile(
                 "main",
                 StoredSqliteLocation::Path {
@@ -430,11 +394,9 @@ mod tests {
         let expected_home = dirs_next::home_dir()
             .expect("home dir")
             .join("db/main.sqlite");
-        assert!(matches!(
-            &resolved[0].provider,
-            ResolvedProviderConfig::Sqlite(sqlite)
-                if sqlite.location == SqliteLocation::Path(expected_home)
-        ));
+        let sqlite: kandb_provider_sqlite::SqliteConfig =
+            serde_json::from_value(resolved[0].config_json.clone()).unwrap();
+        assert_eq!(sqlite.location, SqliteLocation::Path(expected_home));
     }
 
     fn sqlite_profile(id: &str, location: StoredSqliteLocation) -> StoredConnectionProfile {
