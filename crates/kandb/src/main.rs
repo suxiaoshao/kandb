@@ -29,7 +29,10 @@ fn init(cx: &mut App) {
     i18n::init_i18n(cx);
     gpui_component::init(cx);
     app_menus::init(cx);
-    cx.set_menus(app_menus::app_menus(cx.global::<i18n::I18n>()));
+    let i18n = cx.global::<i18n::I18n>();
+    cx.set_menus(app_menus::app_menus(i18n));
+    #[cfg(target_os = "macos")]
+    app_menus::ensure_localized_window_menu_registered();
     cx.activate(true);
     views::init(cx);
 }

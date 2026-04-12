@@ -3,6 +3,8 @@ use crate::{APP_TITLE, i18n::I18n, views::about::open_about_window};
 use gpui::SystemMenuType;
 use gpui::{App, KeyBinding, Menu, MenuItem, actions};
 use kandb_i18n::FluentArgs;
+#[cfg(test)]
+use kandb_i18n::Translator;
 use tracing::{Level, event};
 
 actions!(
@@ -18,6 +20,8 @@ actions!(
         ShowAll
     ]
 );
+
+const WINDOW_MENU_INDEX: usize = 2;
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
@@ -87,6 +91,51 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
     ]
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn ensure_localized_window_menu_registered() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        event!(
+            Level::WARN,
+            "window menu registration requires the main thread"
+        );
+        return;
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    let Some(main_menu) = app.mainMenu() else {
+        event!(Level::WARN, "main menu is not available");
+        return;
+    };
+
+    let Some(item) = main_menu.itemAtIndex(WINDOW_MENU_INDEX as _) else {
+        event!(
+            Level::WARN,
+            index = WINDOW_MENU_INDEX,
+            "window menu item is not available"
+        );
+        return;
+    };
+
+    let Some(submenu) = item.submenu() else {
+        event!(
+            Level::WARN,
+            index = WINDOW_MENU_INDEX,
+            "window menu item has no submenu"
+        );
+        return;
+    };
+
+    app.setWindowsMenu(Some(&submenu));
+    event!(
+        Level::INFO,
+        index = WINDOW_MENU_INDEX,
+        "registered localized window menu with NSApp"
+    );
+}
+
 fn app_name_message(i18n: &I18n, key: &str) -> String {
     let mut args = FluentArgs::new();
     args.set("app_name", APP_TITLE);
@@ -126,6 +175,28 @@ mod tests {
             names,
             vec![APP_TITLE.to_string(), "File".into(), "Window".into()]
         );
+    }
+
+    #[test]
+    fn builds_expected_top_level_menus_for_chinese() {
+        let i18n = I18n::new(Translator::for_locale_tag("zh-CN"));
+        let menus = app_menus(&i18n);
+        let names = menus
+            .iter()
+            .map(|menu| menu.name.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![APP_TITLE.to_string(), "文件".into(), "窗口".into()]
+        );
+    }
+
+    #[test]
+    fn localized_window_menu_stays_in_expected_slot_for_chinese() {
+        let i18n = I18n::new(Translator::for_locale_tag("zh-CN"));
+        let menus = app_menus(&i18n);
+
+        assert_eq!(menus[WINDOW_MENU_INDEX].name.to_string(), "窗口");
     }
 
     #[test]

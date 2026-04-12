@@ -1,3 +1,4 @@
+use kandb_i18n::macos_bundle_localizations;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -53,6 +54,9 @@ pub fn inject_liquid_glass_icon(app_dir: &Path, app_path: &Path) -> Result<()> {
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("Icon");
+    let plist = app_path.join("Contents/Info.plist");
+
+    update_bundle_metadata(&plist, None)?;
 
     if !icon_dir.exists() {
         warn!(icon_dir = %icon_dir.display(), "no .icon directory found, skipping Liquid Glass icon injection");
@@ -130,8 +134,7 @@ pub fn inject_liquid_glass_icon(app_dir: &Path, app_path: &Path) -> Result<()> {
         ))
     })?;
 
-    let plist = app_path.join("Contents/Info.plist");
-    update_bundle_icon_name(&plist, icon_name)?;
+    update_bundle_metadata(&plist, Some(icon_name))?;
 
     if command_exists("codesign") {
         let codesign_args: Vec<&OsStr> = vec![
@@ -149,7 +152,7 @@ pub fn inject_liquid_glass_icon(app_dir: &Path, app_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn update_bundle_icon_name(plist_path: &Path, icon_name: &str) -> Result<()> {
+fn update_bundle_metadata(plist_path: &Path, icon_name: Option<&str>) -> Result<()> {
     let mut value = plist::Value::from_file(plist_path)?;
     let dict = value.as_dictionary_mut().ok_or_else(|| {
         XtaskError::msg(format!(
@@ -157,10 +160,141 @@ fn update_bundle_icon_name(plist_path: &Path, icon_name: &str) -> Result<()> {
             plist_path.display()
         ))
     })?;
+    if let Some(icon_name) = icon_name {
+        dict.insert(
+            "CFBundleIconName".to_string(),
+            plist::Value::String(icon_name.to_string()),
+        );
+    }
     dict.insert(
-        "CFBundleIconName".to_string(),
-        plist::Value::String(icon_name.to_string()),
+        "CFBundleDevelopmentRegion".to_string(),
+        plist::Value::String("en-US".to_string()),
+    );
+    dict.insert(
+        "CFBundleLocalizations".to_string(),
+        plist::Value::Array(
+            macos_bundle_localizations()
+                .iter()
+                .map(|localization| {
+                    plist::Value::String(localization.bundle_locale_tag.to_string())
+                })
+                .collect(),
+        ),
     );
     value.to_file_xml(plist_path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_bundle_metadata;
+    use crate::error::Result;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new() -> Result<Self> {
+            let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "xtask-macos-bundle-{suffix}-{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path)?;
+            Ok(Self { path })
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn update_bundle_metadata_sets_localization_keys_without_dropping_existing_values() -> Result<()>
+    {
+        let temp_dir = TestDir::new()?;
+        let plist_path = temp_dir.path.join("Info.plist");
+        let mut dict = plist::Dictionary::new();
+        dict.insert(
+            "CFBundleIdentifier".to_string(),
+            plist::Value::String("top.sushao.kandb".to_string()),
+        );
+        dict.insert(
+            "CFBundleDevelopmentRegion".to_string(),
+            plist::Value::String("English".to_string()),
+        );
+        plist::Value::Dictionary(dict).to_file_xml(&plist_path)?;
+
+        update_bundle_metadata(&plist_path, Some("icon"))?;
+
+        let value = plist::Value::from_file(&plist_path)?;
+        let dict = value
+            .as_dictionary()
+            .expect("plist root should remain a dictionary");
+
+        assert_eq!(
+            dict.get("CFBundleIdentifier"),
+            Some(&plist::Value::String("top.sushao.kandb".to_string()))
+        );
+        assert_eq!(
+            dict.get("CFBundleIconName"),
+            Some(&plist::Value::String("icon".to_string()))
+        );
+        assert_eq!(
+            dict.get("CFBundleDevelopmentRegion"),
+            Some(&plist::Value::String("en-US".to_string()))
+        );
+        assert_eq!(
+            dict.get("CFBundleLocalizations"),
+            Some(&plist::Value::Array(vec![
+                plist::Value::String("en-US".to_string()),
+                plist::Value::String("zh-Hans".to_string()),
+            ]))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_bundle_metadata_preserves_existing_icon_when_icon_name_is_absent() -> Result<()> {
+        let temp_dir = TestDir::new()?;
+        let plist_path = temp_dir.path.join("Info.plist");
+        let mut dict = plist::Dictionary::new();
+        dict.insert(
+            "CFBundleIconName".to_string(),
+            plist::Value::String("existing-icon".to_string()),
+        );
+        plist::Value::Dictionary(dict).to_file_xml(&plist_path)?;
+
+        update_bundle_metadata(&plist_path, None)?;
+
+        let value = plist::Value::from_file(&plist_path)?;
+        let dict = value
+            .as_dictionary()
+            .expect("plist root should remain a dictionary");
+
+        assert_eq!(
+            dict.get("CFBundleIconName"),
+            Some(&plist::Value::String("existing-icon".to_string()))
+        );
+        assert_eq!(
+            dict.get("CFBundleDevelopmentRegion"),
+            Some(&plist::Value::String("en-US".to_string()))
+        );
+        assert_eq!(
+            dict.get("CFBundleLocalizations"),
+            Some(&plist::Value::Array(vec![
+                plist::Value::String("en-US".to_string()),
+                plist::Value::String("zh-Hans".to_string()),
+            ]))
+        );
+
+        Ok(())
+    }
 }

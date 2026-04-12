@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
 image = "0.25.10"
+kandb-i18n = { path = "../kandb-i18n" }
 plist = "1.8.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"

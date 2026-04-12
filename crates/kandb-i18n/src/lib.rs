@@ -12,6 +12,23 @@ const ZH_CN_APP_HOME: &str = include_str!("../locales/zh-CN/app-home.ftl");
 const ZH_CN_APP_MENU: &str = include_str!("../locales/zh-CN/app-menu.ftl");
 const ZH_CN_PROVIDER_SQLITE: &str = include_str!("../locales/zh-CN/provider-sqlite.ftl");
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MacOsBundleLocalization {
+    pub bundle_locale_tag: &'static str,
+    pub lproj_dir: &'static str,
+}
+
+const MACOS_BUNDLE_LOCALIZATIONS: [MacOsBundleLocalization; 2] = [
+    MacOsBundleLocalization {
+        bundle_locale_tag: "en-US",
+        lproj_dir: "en-US.lproj",
+    },
+    MacOsBundleLocalization {
+        bundle_locale_tag: "zh-Hans",
+        lproj_dir: "zh-Hans.lproj",
+    },
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 enum Locale {
     EnUs,
@@ -176,9 +193,13 @@ fn build_bundle(lang: &str, sources: &[&str]) -> FluentBundle<FluentResource> {
     bundle
 }
 
+pub fn macos_bundle_localizations() -> &'static [MacOsBundleLocalization] {
+    &MACOS_BUNDLE_LOCALIZATIONS
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Locale, Translator, locale_from_candidates};
+    use super::{Locale, Translator, locale_from_candidates, macos_bundle_localizations};
 
     #[test]
     fn chinese_locale_maps_to_zh_cn() {
@@ -283,5 +304,22 @@ mod tests {
         let i18n = Translator::for_locale_tag("zh-CN");
 
         assert_eq!(i18n.t("provider-sqlite-sidebar-group-tables"), "表");
+    }
+
+    #[test]
+    fn macos_bundle_localizations_match_supported_app_locales() {
+        assert_eq!(
+            macos_bundle_localizations(),
+            &[
+                super::MacOsBundleLocalization {
+                    bundle_locale_tag: "en-US",
+                    lproj_dir: "en-US.lproj",
+                },
+                super::MacOsBundleLocalization {
+                    bundle_locale_tag: "zh-Hans",
+                    lproj_dir: "zh-Hans.lproj",
+                },
+            ]
+        );
     }
 }
