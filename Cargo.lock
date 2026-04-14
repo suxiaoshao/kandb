@@ -11065,7 +11065,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "which 8.0.2",
 ]
 
 [[package]]

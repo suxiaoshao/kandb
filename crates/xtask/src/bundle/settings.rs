@@ -252,6 +252,7 @@ deep_link_protocols = [{ schemes = ["kandb"] }]
 icon = [
   "../../assets/icon/app-icon.ico",
   "../../assets/icon.icon/Assets/app-icon.png",
+  "../../assets/icon.icon",
 ]
 "#,
         )?;
@@ -259,11 +260,13 @@ icon = [
         let (_, bundle_settings) = read_bundle_settings(&manifest_path)?;
         let expected_ico = app_dir.join("../../assets/icon/app-icon.ico");
         let expected_png = app_dir.join("../../assets/icon.icon/Assets/app-icon.png");
+        let expected_icon = app_dir.join("../../assets/icon.icon");
         assert_eq!(
             bundle_settings.icon,
             Some(vec![
                 expected_ico.to_string_lossy().into_owned(),
                 expected_png.to_string_lossy().into_owned(),
+                expected_icon.to_string_lossy().into_owned(),
             ])
         );
         assert_eq!(bundle_settings.license_file, Some(app_dir.join("LICENSE")));

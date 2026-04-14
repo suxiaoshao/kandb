@@ -21,6 +21,7 @@ icon = [
   "../../assets/icon/app-icon.iconset/icon_256x256@2x.png",
   "../../assets/icon/app-icon.iconset/icon_512x512.png",
   "../../assets/icon/app-icon.iconset/icon_512x512@2x.png",
+  "../../assets/icon.icon",
 ]
 short_description = "A lightweight database viewer and manager built with GPUI."
 long_description = """

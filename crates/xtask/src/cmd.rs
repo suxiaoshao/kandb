@@ -4,11 +4,6 @@ use std::process::{Command, ExitStatus};
 
 use crate::error::{Result, XtaskError};
 
-#[cfg(target_os = "macos")]
-pub fn command_exists(command: &str) -> bool {
-    which::which(command).is_ok()
-}
-
 pub fn run_cmd(command: &str, args: &[&str], current_dir: Option<&Path>) -> Result<()> {
     let args: Vec<&OsStr> = args.iter().map(OsStr::new).collect();
     run_cmd_os(command, &args, current_dir)
