@@ -285,12 +285,14 @@ icon = [
             .as_ref()
             .expect("macOS localization resources should be present");
         assert!(resources_map.iter().any(|(source, destination)| {
-            source.ends_with("crates/kandb-i18n/locales/macos/en-US.lproj/InfoPlist.strings")
-                && destination == "en-US.lproj/InfoPlist.strings"
+            Path::new(source).ends_with(Path::new("crates").join(
+                "kandb-i18n/locales/macos/en-US.lproj/InfoPlist.strings",
+            )) && destination == "en-US.lproj/InfoPlist.strings"
         }));
         assert!(resources_map.iter().any(|(source, destination)| {
-            source.ends_with("crates/kandb-i18n/locales/macos/zh-Hans.lproj/InfoPlist.strings")
-                && destination == "zh-Hans.lproj/InfoPlist.strings"
+            Path::new(source).ends_with(Path::new("crates").join(
+                "kandb-i18n/locales/macos/zh-Hans.lproj/InfoPlist.strings",
+            )) && destination == "zh-Hans.lproj/InfoPlist.strings"
         }));
 
         Ok(())
