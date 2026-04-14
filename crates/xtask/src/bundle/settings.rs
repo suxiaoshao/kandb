@@ -218,6 +218,17 @@ mod tests {
         }
     }
 
+    fn contains_localization_resource(
+        resources_map: &HashMap<String, String>,
+        source_suffix: &Path,
+        destination: &Path,
+    ) -> bool {
+        resources_map.iter().any(|(source, mapped_destination)| {
+            Path::new(source).ends_with(source_suffix)
+                && Path::new(mapped_destination) == destination
+        })
+    }
+
     #[allow(deprecated)]
     #[test]
     fn read_bundle_settings_resolves_relative_bundle_paths() -> Result<()> {
@@ -284,16 +295,16 @@ icon = [
             .resources_map
             .as_ref()
             .expect("macOS localization resources should be present");
-        assert!(resources_map.iter().any(|(source, destination)| {
-            Path::new(source).ends_with(Path::new("crates").join(
-                "kandb-i18n/locales/macos/en-US.lproj/InfoPlist.strings",
-            )) && destination == "en-US.lproj/InfoPlist.strings"
-        }));
-        assert!(resources_map.iter().any(|(source, destination)| {
-            Path::new(source).ends_with(Path::new("crates").join(
-                "kandb-i18n/locales/macos/zh-Hans.lproj/InfoPlist.strings",
-            )) && destination == "zh-Hans.lproj/InfoPlist.strings"
-        }));
+        assert!(contains_localization_resource(
+            resources_map,
+            &Path::new("crates").join("kandb-i18n/locales/macos/en-US.lproj/InfoPlist.strings"),
+            &Path::new("en-US.lproj").join("InfoPlist.strings"),
+        ));
+        assert!(contains_localization_resource(
+            resources_map,
+            &Path::new("crates").join("kandb-i18n/locales/macos/zh-Hans.lproj/InfoPlist.strings"),
+            &Path::new("zh-Hans.lproj").join("InfoPlist.strings"),
+        ));
 
         Ok(())
     }
