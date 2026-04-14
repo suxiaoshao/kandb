@@ -14,6 +14,7 @@ use crate::error::{Result, XtaskError};
 
 const ASSETS_CAR_DESTINATION: &str = "Assets.car";
 const LIQUID_GLASS_ICON_NAME: &str = "Icon";
+const XCRUN_COMMAND: &str = "xcrun";
 
 pub fn prepare_bundle_settings(out_dir: &Path, bundle_settings: &mut BundleSettings) -> Result<()> {
     let asset_source = select_liquid_glass_source(bundle_settings.icon.as_mut());
@@ -130,7 +131,7 @@ fn compile_icon_composer_asset(source_dir: &Path, staging_dir: &Path) -> Result<
     })?;
 
     let actool_plist = output_path.join("assetcatalog_generated_info.plist");
-    let output = Command::new("actool")
+    let output = developer_tool("actool")
         .arg(&icon_dest_path)
         .arg("--compile")
         .arg(&output_path)
@@ -157,7 +158,7 @@ fn compile_icon_composer_asset(source_dir: &Path, staging_dir: &Path) -> Result<
         .arg("macosx")
         .output()
         .map_err(|err| XtaskError::CommandExecute {
-            command: "actool".to_string(),
+            command: format!("{XCRUN_COMMAND} actool"),
             source: err,
         })?;
 
@@ -189,28 +190,26 @@ fn compile_icon_composer_asset(source_dir: &Path, staging_dir: &Path) -> Result<
 
 fn validate_icon_composer_asset(icon_path: &Path, temp_dir: &Path) -> Result<()> {
     let preview_path = temp_dir.join("icon-preview.png");
-    let output = Command::new(
-        "/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool",
-    )
-    .arg(icon_path)
-    .arg("--export-image")
-    .arg("--output-file")
-    .arg(&preview_path)
-    .arg("--platform")
-    .arg("macOS")
-    .arg("--rendition")
-    .arg("Default")
-    .arg("--width")
-    .arg("256")
-    .arg("--height")
-    .arg("256")
-    .arg("--scale")
-    .arg("1")
-    .output()
-    .map_err(|err| XtaskError::CommandExecute {
-        command: "ictool".to_string(),
-        source: err,
-    })?;
+    let output = developer_tool("ictool")
+        .arg(icon_path)
+        .arg("--export-image")
+        .arg("--output-file")
+        .arg(&preview_path)
+        .arg("--platform")
+        .arg("macOS")
+        .arg("--rendition")
+        .arg("Default")
+        .arg("--width")
+        .arg("256")
+        .arg("--height")
+        .arg("256")
+        .arg("--scale")
+        .arg("1")
+        .output()
+        .map_err(|err| XtaskError::CommandExecute {
+            command: format!("{XCRUN_COMMAND} ictool"),
+            source: err,
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -325,12 +324,12 @@ fn bundle_info_plist_overrides(assets_car_path: Option<&Path>) -> Result<plist::
 }
 
 fn app_icon_name_from_assets_car(assets_car_path: &Path) -> Result<Option<String>> {
-    let output = Command::new("assetutil")
+    let output = developer_tool("assetutil")
         .arg("--info")
         .arg(assets_car_path)
         .output()
         .map_err(|err| XtaskError::CommandExecute {
-            command: "assetutil".to_string(),
+            command: format!("{XCRUN_COMMAND} assetutil"),
             source: err,
         })?;
 
@@ -350,6 +349,12 @@ fn app_icon_name_from_assets_car(assets_car_path: &Path) -> Result<Option<String
         .map(|entry| entry.name))
 }
 
+fn developer_tool(tool: &str) -> Command {
+    let mut command = Command::new(XCRUN_COMMAND);
+    command.arg(tool);
+    command
+}
+
 #[derive(Debug, Deserialize)]
 struct AssetsCarInfo {
     #[serde(rename = "AssetType", default)]
@@ -366,7 +371,10 @@ enum LiquidGlassSource {
 
 #[cfg(test)]
 mod tests {
-    use super::{LiquidGlassSource, bundle_info_plist_overrides, select_liquid_glass_source};
+    use super::{
+        LiquidGlassSource, XCRUN_COMMAND, bundle_info_plist_overrides, developer_tool,
+        select_liquid_glass_source,
+    };
     use crate::error::Result;
 
     #[test]
@@ -410,5 +418,16 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn developer_tool_uses_xcrun_resolution() {
+        let command = developer_tool("ictool");
+
+        assert_eq!(command.get_program(), std::ffi::OsStr::new(XCRUN_COMMAND));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("ictool")]
+        );
     }
 }
