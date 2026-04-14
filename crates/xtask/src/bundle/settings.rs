@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
 
+use kandb_i18n::macos_bundle_localizations;
 use tauri_bundler::{AppCategory, BundleSettings, PackageSettings};
 
 use crate::error::{Result, XtaskError};
@@ -63,6 +66,7 @@ pub fn read_bundle_settings(manifest_path: &Path) -> Result<(PackageSettings, Bu
         .license_file
         .as_deref()
         .map(|path| resolve_manifest_path(manifest_dir, path));
+    bundle_settings.resources_map = Some(macos_bundle_localization_resources(manifest_dir)?);
     sync_windows_icon_path(&mut bundle_settings);
 
     let package_settings = PackageSettings {
@@ -108,6 +112,61 @@ fn sync_windows_icon_path(bundle_settings: &mut BundleSettings) {
 
 fn default_windows_icon_path() -> PathBuf {
     PathBuf::from("icons/icon.ico")
+}
+
+fn macos_bundle_localization_resources(manifest_dir: &Path) -> Result<HashMap<String, String>> {
+    let resources_root = fs::canonicalize(manifest_dir.join("../kandb-i18n/locales/macos"))
+        .map_err(|err| {
+            XtaskError::msg(format!(
+                "failed to resolve macOS localization root relative to {}: {err}",
+                manifest_dir.display()
+            ))
+        })?;
+    let mut resources_map = HashMap::new();
+
+    for localization in macos_bundle_localizations() {
+        let lproj_dir = resources_root.join(localization.lproj_dir);
+        if !lproj_dir.exists() {
+            return Err(XtaskError::msg(format!(
+                "missing macOS localization directory {}",
+                lproj_dir.display()
+            )));
+        }
+
+        for entry in walkdir::WalkDir::new(&lproj_dir) {
+            let entry = entry.map_err(|err| {
+                XtaskError::msg(format!(
+                    "failed to walk macOS localization resources under {}: {err}",
+                    lproj_dir.display()
+                ))
+            })?;
+
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let path = fs::canonicalize(entry.path()).map_err(|err| {
+                XtaskError::msg(format!(
+                    "failed to resolve macOS localization resource {}: {err}",
+                    entry.path().display()
+                ))
+            })?;
+            let relative = path.strip_prefix(&resources_root).map_err(|err| {
+                XtaskError::msg(format!(
+                    "failed to strip localization root {} from {}: {err}",
+                    resources_root.display(),
+                    path.display()
+                ))
+            })?;
+
+            resources_map.insert(
+                path.to_string_lossy().into_owned(),
+                relative.to_string_lossy().into_owned(),
+            );
+        }
+    }
+
+    Ok(resources_map)
 }
 
 fn infer_publisher_from_identifier(identifier: &str) -> Option<String> {
@@ -159,11 +218,36 @@ mod tests {
         }
     }
 
+    fn contains_localization_resource(
+        resources_map: &HashMap<String, String>,
+        source_suffix: &Path,
+        destination: &Path,
+    ) -> bool {
+        resources_map.iter().any(|(source, mapped_destination)| {
+            Path::new(source).ends_with(source_suffix)
+                && Path::new(mapped_destination) == destination
+        })
+    }
+
     #[allow(deprecated)]
     #[test]
     fn read_bundle_settings_resolves_relative_bundle_paths() -> Result<()> {
         let temp_dir = TestDir::new()?;
-        let manifest_path = temp_dir.path.join("Cargo.toml");
+        let app_dir = temp_dir.path.join("crates/kandb");
+        let i18n_dir = temp_dir.path.join("crates/kandb-i18n/locales/macos");
+        fs::create_dir_all(&app_dir)?;
+        fs::create_dir_all(i18n_dir.join("en-US.lproj"))?;
+        fs::create_dir_all(i18n_dir.join("zh-Hans.lproj"))?;
+        fs::write(
+            i18n_dir.join("en-US.lproj/InfoPlist.strings"),
+            "\"CFBundleName\" = \"KanDB\";\n",
+        )?;
+        fs::write(
+            i18n_dir.join("zh-Hans.lproj/InfoPlist.strings"),
+            "\"CFBundleName\" = \"KanDB\";\n",
+        )?;
+
+        let manifest_path = app_dir.join("Cargo.toml");
         fs::write(
             &manifest_path,
             r#"[package]
@@ -179,27 +263,24 @@ deep_link_protocols = [{ schemes = ["kandb"] }]
 icon = [
   "../../assets/icon/app-icon.ico",
   "../../assets/icon.icon/Assets/app-icon.png",
+  "../../assets/icon.icon",
 ]
 "#,
         )?;
 
         let (_, bundle_settings) = read_bundle_settings(&manifest_path)?;
-        let expected_ico = temp_dir.path.join("../../assets/icon/app-icon.ico");
-        let expected_png = temp_dir
-            .path
-            .join("../../assets/icon.icon/Assets/app-icon.png");
-
+        let expected_ico = app_dir.join("../../assets/icon/app-icon.ico");
+        let expected_png = app_dir.join("../../assets/icon.icon/Assets/app-icon.png");
+        let expected_icon = app_dir.join("../../assets/icon.icon");
         assert_eq!(
             bundle_settings.icon,
             Some(vec![
                 expected_ico.to_string_lossy().into_owned(),
                 expected_png.to_string_lossy().into_owned(),
+                expected_icon.to_string_lossy().into_owned(),
             ])
         );
-        assert_eq!(
-            bundle_settings.license_file,
-            Some(temp_dir.path.join("LICENSE"))
-        );
+        assert_eq!(bundle_settings.license_file, Some(app_dir.join("LICENSE")));
         assert_eq!(bundle_settings.category, Some(AppCategory::DeveloperTool));
         assert_eq!(
             bundle_settings
@@ -210,6 +291,20 @@ icon = [
             vec!["kandb".to_string()]
         );
         assert_eq!(bundle_settings.windows.icon_path, expected_ico);
+        let resources_map = bundle_settings
+            .resources_map
+            .as_ref()
+            .expect("macOS localization resources should be present");
+        assert!(contains_localization_resource(
+            resources_map,
+            &Path::new("crates").join("kandb-i18n/locales/macos/en-US.lproj/InfoPlist.strings"),
+            &Path::new("en-US.lproj").join("InfoPlist.strings"),
+        ));
+        assert!(contains_localization_resource(
+            resources_map,
+            &Path::new("crates").join("kandb-i18n/locales/macos/zh-Hans.lproj/InfoPlist.strings"),
+            &Path::new("zh-Hans.lproj").join("InfoPlist.strings"),
+        ));
 
         Ok(())
     }

@@ -35,10 +35,13 @@ pub fn run(args: BundleArgs) -> Result<()> {
     let manifest_path = app_dir.join("Cargo.toml");
     let manifest = Manifest::from_path(&manifest_path)?;
     let main_bin_name = manifest.main_binary_name();
-    let (package_settings, bundle_settings) = settings::read_bundle_settings(&manifest_path)?;
+    let (package_settings, mut bundle_settings) = settings::read_bundle_settings(&manifest_path)?;
 
     let out_dir = bundle_out_dir(&workspace_dir, &main_bin_name)?;
     info!(bundle_out_dir = %out_dir.display(), "using bundle output dir");
+
+    #[cfg(target_os = "macos")]
+    macos::prepare_bundle_settings(&out_dir, &mut bundle_settings)?;
 
     let mut settings_builder = SettingsBuilder::new()
         .project_out_directory(&out_dir)
@@ -85,20 +88,11 @@ fn prepare_platform_bundle(app_dir: &Path) -> Result<()> {
 
 fn finalize_platform_bundle(
     _args: &BundleArgs,
-    app_dir: &Path,
-    bundle_dir: &Path,
+    _app_dir: &Path,
+    _bundle_dir: &Path,
     _out_dir: &Path,
     _bundles: Vec<tauri_bundler::Bundle>,
 ) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(app_path) = macos::first_app_bundle(bundle_dir)? {
-            macos::inject_liquid_glass_icon(app_dir, &app_path)?;
-        } else {
-            warn!("no .app bundle found, skipping Liquid Glass icon injection");
-        }
-    }
-
     #[cfg(target_os = "windows")]
     {
         let mut artifacts: Vec<PathBuf> = _bundles
@@ -128,7 +122,7 @@ fn finalize_platform_bundle(
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let _ = (_args, app_dir, bundle_dir, _out_dir, _bundles);
+        let _ = (_args, _app_dir, _bundle_dir, _out_dir, _bundles);
     }
 
     Ok(())
