@@ -42,6 +42,8 @@ kanDB 使用 Rust 和 GPUI 构建，目标是在原生性能基础上提供一�
 
 本地运行当前项目:
 
+macOS / Linux 先执行 `nix develop`（Fish 可用 `nix develop --command fish --no-config`）。`flake.lock` 固定编译器与原生依赖，Rust 版本由 `rust-toolchain.toml` 统一声明。macOS 仍需完整 Xcode 和 Metal 工具（缺少组件时执行 `xcodebuild -downloadComponent MetalToolchain`）；Linux GUI 运行需要宿主图形会话与驱动。CI 的 macOS / Linux 检查使用同一环境，Windows 原生开发使用 Rustup / MSVC，WSL 使用 Linux 环境。
+
 ```bash
 cargo run -p kandb
 ```
