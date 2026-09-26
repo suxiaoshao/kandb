@@ -40,6 +40,10 @@ KanDB is being built in Rust with GPUI. The intent is to combine native performa
 
 The repository currently contains the initial Rust project scaffold. As implementation begins, the README will evolve alongside the product.
 
+On macOS / Linux, run `nix develop` first. `flake.lock` pins the compiler and native dependencies; `rust-toolchain.toml` defines the shared Rust version. For Fish, use `nix develop --command fish --no-config`. macOS also needs full Xcode and its Metal tools (`xcodebuild -downloadComponent MetalToolchain` if missing); Linux GUI execution needs a host graphical session and graphics drivers. Native Windows development and CI use Rustup / MSVC; WSL uses the Linux shell.
+
+macOS / Linux CI runs its Cargo commands in this same development shell.
+
 To run the current project locally:
 
 ```bash
